@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CarTwitch OAuth Redirect</title>
+    <script>
+        // Get the hash fragment from the URL
+        const hash = window.location.hash;
+        if (hash) {
+            // Remove the leading # and construct the custom URL
+            const params = hash.substring(1);
+            window.location.replace('cartwitch-oauth://oauth?' + params);
+        } else {
+            document.body.innerHTML = 'No OAuth parameters found.';
+        }
+    </script>
+</head>
+<body>
+    Redirecting...
+</body>
+</html>
