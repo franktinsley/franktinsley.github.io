@@ -4,6 +4,10 @@
     <title>CarTwitch Review Mode</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+        :root {
+            color-scheme: light dark;
+        }
+        
         body { 
             font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
             padding: 20px;
@@ -11,53 +15,101 @@
             margin: 0 auto;
             line-height: 1.5;
         }
+
+        @media (prefers-color-scheme: light) {
+            body {
+                color: #333;
+                background-color: #fff;
+            }
+            .button {
+                background-color: #9146FF;
+                color: white;
+            }
+            .button:hover {
+                background-color: #7d32e6;
+            }
+            .instructions, .exit-instructions {
+                background-color: #f8f9fa;
+                border-left: 4px solid #9146FF;
+            }
+            .important-note {
+                background-color: #fff3cd;
+                border-left: 4px solid #ffc107;
+            }
+            h1 {
+                color: #9146FF;
+            }
+            .note {
+                color: #666;
+            }
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            body {
+                color: #e0e0e0;
+                background-color: #121212;
+            }
+            .button {
+                background-color: #a970ff;
+                color: white;
+            }
+            .button:hover {
+                background-color: #8f5bd6;
+            }
+            .instructions, .exit-instructions {
+                background-color: #1e1e1e;
+                border-left: 4px solid #a970ff;
+            }
+            .important-note {
+                background-color: #332701;
+                border-left: 4px solid #ffc107;
+            }
+            h1 {
+                color: #a970ff;
+            }
+            .note {
+                color: #b0b0b0;
+            }
+        }
+        
         .button {
             display: block;
-            background-color: #9146FF; /* Twitch color */
-            color: white;
             text-align: center;
             padding: 15px;
             margin: 20px 0;
             border-radius: 8px;
             text-decoration: none;
             font-weight: bold;
+            transition: background-color 0.2s;
         }
-        h1 {
-            color: #9146FF;
-        }
-        .instructions {
-            background-color: #f8f9fa;
-            border-left: 4px solid #9146FF;
+        
+        .instructions, .exit-instructions {
             padding: 15px;
             margin: 20px 0;
         }
+        
         .note {
             font-size: 14px;
-            color: #555;
             margin-top: 30px;
         }
+        
         .feature-list {
             margin-top: 20px;
         }
+        
         .feature-item {
             display: flex;
             align-items: center;
             margin-bottom: 10px;
         }
+        
         .check-icon {
             color: #38B44A;
             margin-right: 10px;
             font-weight: bold;
         }
-        .exit-instructions {
-            margin-top: 30px;
-            background-color: #f8f9fa;
-            border-left: 4px solid #888;
-            padding: 15px;
-        }
+        
         .important-note {
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
             padding: 15px;
             margin: 20px 0;
         }
