@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CarTwitch Review Mode</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.5;
+        }
+        .button {
+            display: block;
+            background-color: #9146FF; /* Twitch color */
+            color: white;
+            text-align: center;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        h1 {
+            color: #9146FF;
+        }
+        .instructions {
+            background-color: #f8f9fa;
+            border-left: 4px solid #9146FF;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .note {
+            font-size: 14px;
+            color: #555;
+            margin-top: 30px;
+        }
+        .feature-list {
+            margin-top: 20px;
+        }
+        .feature-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .check-icon {
+            color: #38B44A;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+        .exit-instructions {
+            margin-top: 30px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #888;
+            padding: 15px;
+        }
+        .important-note {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>CarTwitch Review Mode</h1>
+    
+    <div class="important-note">
+        <h2>⚠️ Important for App Store Reviewers:</h2>
+        <p>This page provides a complete demo mode for testing all app functionality without requiring a Twitch account. Please follow the instructions below to access the full app experience.</p>
+    </div>
+    
+    <div class="instructions">
+        <h2>Method 1 - Quick Activation (Recommended):</h2>
+        <ol>
+            <li>Make sure you have installed CarTwitch on this device</li>
+            <li>Tap the purple button below</li>
+            <li>When prompted, select "Open" to launch CarTwitch</li>
+            <li>The app will automatically enable review mode and simulate a logged-in account</li>
+        </ol>
+    </div>
+    
+    <a href="cartwitch-oauth://review-mode" class="button">Activate Review Mode</a>
+    
+    <div class="instructions">
+        <h2>Method 2 - Manual Activation:</h2>
+        <ol>
+            <li>Open the CarTwitch app</li>
+            <li>Go to Settings</li>
+            <li>Tap "Enable Review Mode" in the "App Store Review Mode" section</li>
+            <li>Enter any username and password in the demo login screen</li>
+            <li>The app will automatically simulate a logged-in account</li>
+        </ol>
+    </div>
+    
+    <div class="feature-list">
+        <h3>What Review Mode Enables:</h3>
+        <div class="feature-item">
+            <span class="check-icon">✓</span> Automatic simulated Twitch account login
+        </div>
+        <div class="feature-item">
+            <span class="check-icon">✓</span> Following tab with auto-populated content
+        </div>
+        <div class="feature-item">
+            <span class="check-icon">✓</span> Complete CarPlay integration
+        </div>
+        <div class="feature-item">
+            <span class="check-icon">✓</span> Profile image in settings
+        </div>
+        <div class="feature-item">
+            <span class="check-icon">✓</span> Full access to all subscription features
+        </div>
+    </div>
+    
+    <div class="exit-instructions">
+        <h3>Exiting Review Mode:</h3>
+        <ol>
+            <li>Go to Settings</li>
+            <li>Tap "Exit Review Mode" in the "App Store Review Mode" section</li>
+            <li>The app will return to its normal state without demo content</li>
+        </ol>
+    </div>
+    
+    <div class="note">
+        <p><strong>Note for Reviewers:</strong> This demo mode provides full access to all app features and functionality. No Twitch account is required for testing. If you encounter any issues, please contact us through App Store Connect.</p>
+    </div>
+</body>
+</html> 
