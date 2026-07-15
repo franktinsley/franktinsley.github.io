@@ -10,7 +10,7 @@ async function init() {
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: 'opaque' });
 
-  const code = await (await fetch('shader.wgsl?v=b44120e-163214')).text();
+  const code = await (await fetch('shader.wgsl?v=cc12360-163523')).text();
   const module = device.createShaderModule({ code });
   const info = await module.getCompilationInfo();
   for (const m of info.messages) {

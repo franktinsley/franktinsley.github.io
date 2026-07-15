@@ -255,7 +255,7 @@ fn thickness(p : vec3f, refr : vec3f) -> f32 {
   }
   var a = tIn;
   var b = tt;
-  for (var i = 0; i < 4; i++) {
+  for (var i = 0; i < 7; i++) {
     let m = 0.5 * (a + b);
     if (map(p + refr * m).x < 0.0) { a = m; } else { b = m; }
   }
@@ -296,7 +296,7 @@ fn fs(in : VSOut) -> @location(0) vec4f {
 
       // CLEAR transmission: true transparency — exit the body and march the scene behind
       var clearCol = vec3f(0.0);
-      if (frost < 0.75) {
+      if (frost < 0.95) {
         let nExit = calcNormal(exitP);
         let refr2 = refract(refr, -nExit, 1.45);
         if (dot(refr2, refr2) < 0.5) {
@@ -318,11 +318,11 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       // FROSTED transmission: the diffuser — lamp light spread wide and even
       let frostCol = glowRay(exitP, refr, 10.0, 0.55) * 4.6 + env(refr) * 0.3;
 
-      let refrCol = mix(clearCol, frostCol, smoothstep(0.15, 0.75, frost)) * absorb;
+      let refrCol = mix(clearCol, frostCol, smoothstep(0.05, 0.95, frost)) * absorb;
 
       // backlight: a lamp BEHIND a diffuse body blooms through it toward the viewer
       var backlight = vec3f(0.0);
-      if (frost > 0.05) {
+      {
         let tt = u.a.z;
         for (var i = 0; i < 3; i++) {
           let l = emitterPos(i, tt) - p;
