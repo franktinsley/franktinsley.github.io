@@ -214,6 +214,12 @@ fn shadeSimple(p : vec3f, n : vec3f, rd : vec3f, cls : f32, prm : f32) -> vec3f 
        + vec3f(0.04, 0.045, 0.055) * glowDiffuse(p, n);
 }
 
+fn hash12(p : vec2f) -> f32 {
+  var p3 = fract(vec3f(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
 // ---------- ray march ----------
 fn march(ro : vec3f, rd : vec3f) -> vec3f {
   var t = 0.0;
@@ -243,9 +249,9 @@ fn ambOcc(p : vec3f, n : vec3f) -> f32 {
 
 // interior crossing: adaptive march + bisection so the exit lands ON the surface
 // (coarse fixed steps quantize the exit point -> banding rings in refractions)
-fn thickness(p : vec3f, refr : vec3f) -> f32 {
+fn thickness(p : vec3f, refr : vec3f, jit : f32) -> f32 {
   var tIn = 0.01;
-  var tt = 0.02;
+  var tt = 0.02 + jit * 0.014;
   for (var i = 0; i < 16; i++) {
     let dp = map(p + refr * tt).x;
     if (dp > 0.0) { break; }
@@ -289,7 +295,8 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       let refl = reflect(rd, n);
       let refr = refract(rd, n, 1.0 / 1.45);
 
-      let thick = thickness(p, refr);
+      let jit = hash12(frag + fract(u.a.z) * 61.7);
+      let thick = thickness(p, refr, jit);
       let absorbK = mix(vec3f(0.10, 0.06, 0.05) * 1.2, vec3f(0.30, 0.22, 0.18) * 1.6, frost);
       let absorb = exp(-absorbK * thick);
       let exitP = p + refr * thick;
@@ -298,20 +305,25 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       var clearCol = vec3f(0.0);
       if (frost < 0.95) {
         let nExit = calcNormal(exitP);
-        let refr2 = refract(refr, -nExit, 1.45);
-        if (dot(refr2, refr2) < 0.5) {
-          // total internal reflection: glide along the inside
-          let rr = reflect(refr, nExit);
-          clearCol = glowRay(exitP, rr, 8.0, 0.1) * 2.0 + env(rr) * 0.3;
-        } else {
+        // internal-reflection estimate (used fully past the critical angle)
+        let rr = reflect(refr, nExit);
+        let tirCol = glowRay(exitP, rr, 8.0, 0.1) * 2.0 + env(rr) * 0.3;
+        // smooth transition across the critical angle instead of a binary switch
+        let cosX = clamp(dot(refr, nExit), 0.0, 1.0);
+        let k = 1.0 - 1.45 * 1.45 * (1.0 - cosX * cosX);
+        if (k > 0.0) {
+          let refr2 = normalize(refract(refr, -nExit, 1.45));
           // push off along the exit NORMAL so the secondary ray starts cleanly outside
           let ro2 = exitP + nExit * 0.02 + refr2 * 0.01;
           let h2 = march(ro2, refr2);
+          var marched = vec3f(0.0);
           if (h2.y > 0.5) {
             let p2 = ro2 + refr2 * h2.x;
-            clearCol = shadeSimple(p2, calcNormal(p2), refr2, h2.y, h2.z);
+            marched = shadeSimple(p2, calcNormal(p2), refr2, h2.y, h2.z);
           }
-          // miss = the black void, exactly like outside the glass
+          clearCol = mix(tirCol, marched, smoothstep(0.0, 0.12, k));
+        } else {
+          clearCol = tirCol;
         }
       }
 
