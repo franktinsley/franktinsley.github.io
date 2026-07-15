@@ -49,37 +49,40 @@ fn emitterTint(i : i32) -> vec3f {
 const EMITTER_R : f32 = 0.17;
 
 // ---------- scene ----------
-// returns vec2(dist, materialId)
-fn map(p : vec3f) -> vec2f {
+// smin that also blends a material parameter with the SAME weight as the geometry
+// (Shapes-style: the material transitions across the blend neck, no seams)
+fn sminMat(d1 : f32, m1 : f32, d2 : f32, m2 : f32, k : f32) -> vec2f {
+  let h = clamp(0.5 + 0.5 * (d2 - d1) / k, 0.0, 1.0);
+  let d = mix(d2, d1, h) - k * h * (1.0 - h);
+  let m = mix(m2, m1, h);
+  return vec2f(d, m);
+}
+
+// returns vec3(dist, materialClass, frost)  — class: 1 glass, 2 chrome, 3 lamp
+fn map(p : vec3f) -> vec3f {
   let t = u.a.z;
 
   let res = u.a.xy;
   let m = (u.b.xy / res * 2.0 - 1.0) * vec2f(res.x / res.y, -1.0);
   let mw = vec3f(m * 1.4, 0.0);
 
-  // ---- glass group (one liquid body, mixed materials by nearest part) ----
+  // ---- one liquid glass body; frost is a continuously blended parameter ----
   let p1 = vec3f(sin(t * 0.31) * 0.85, cos(t * 0.23) * 0.5, sin(t * 0.17) * 0.3);
   let p2 = vec3f(cos(t * 0.27) * 0.7, sin(t * 0.19) * -0.6, cos(t * 0.29) * 0.25);
   let p3 = vec3f(sin(t * 0.13 + 2.0) * 0.5, sin(t * 0.37) * 0.65, sin(t * 0.11) * 0.35);
 
-  let dClear1 = sdSphere(p - p1, 0.42);                                   // clear drifting blob
+  let dClear1 = sdSphere(p - p1, 0.42);                                   // frost 0
   let chaseR = 0.30 + u.b.z * 0.06 + sin(t * 1.7) * 0.015;
-  let dClear2 = sdSphere(p - mw, chaseR);                                 // clear pointer chaser
-  let dFrost1 = sdSphere(p - p2, 0.34);
-  let dFrost2 = sdSphere(p - p3, 0.28);
-  let dPanel  = sdSquircleBox(p - vec3f(0.0, -0.05, -0.35), vec3f(1.15, 0.55, 0.02), 0.08);
+  let dClear2 = sdSphere(p - mw, chaseR);                                 // frost 0
+  let dFrost1 = sdSphere(p - p2, 0.34);                                   // frost 1
+  let dFrost2 = sdSphere(p - p3, 0.28);                                   // frost 1
+  let dPanel  = sdSquircleBox(p - vec3f(0.0, -0.05, -0.35), vec3f(1.15, 0.55, 0.02), 0.08); // frost 1
 
-  var g = dClear1;
-  g = smin(g, dClear2, 0.42);
-  g = smin(g, dFrost1, 0.35);
-  g = smin(g, dFrost2, 0.35);
-  g = smin(g, dPanel, 0.28);
-
-  // nearest-part material for the group (clear=1, frosted=4)
-  var gm = 1.0;
-  var dNear = min(dClear1, dClear2);
-  let dF = min(dFrost1, min(dFrost2, dPanel));
-  if (dF < dNear) { gm = 4.0; }
+  var g = vec2f(dClear1, 0.0);
+  g = sminMat(g.x, g.y, dClear2, 0.0, 0.42);
+  g = sminMat(g.x, g.y, dFrost1, 1.0, 0.35);
+  g = sminMat(g.x, g.y, dFrost2, 1.0, 0.35);
+  g = sminMat(g.x, g.y, dPanel,  1.0, 0.28);
 
   // ---- chrome satellite ----
   let cpos = vec3f(cos(t * 0.5) * 1.5, sin(t * 0.8) * 0.9, 0.45 + sin(t * 0.33) * 0.2);
@@ -90,11 +93,10 @@ fn map(p : vec3f) -> vec2f {
   e = min(e, sdSphere(p - emitterPos(1, t), EMITTER_R));
   e = min(e, sdSphere(p - emitterPos(2, t), EMITTER_R));
 
-  var d = g;
-  var mat = gm;
-  if (c < d) { d = c; mat = 2.0; }
-  if (e < d) { d = e; mat = 3.0; }
-  return vec2f(d, mat);
+  var out = vec3f(g.x, 1.0, g.y);
+  if (c < out.x) { out = vec3f(c, 2.0, 0.0); }
+  if (e < out.x) { out = vec3f(e, 3.0, 0.0); }
+  return out;
 }
 
 fn calcNormal(p : vec3f) -> vec3f {
@@ -158,18 +160,19 @@ fn film(cosT : f32) -> vec3f {
 }
 
 // ---------- ray march ----------
-fn march(ro : vec3f, rd : vec3f) -> vec2f {
+fn march(ro : vec3f, rd : vec3f) -> vec3f {
   var t = 0.0;
   var m = 0.0;
+  var fr = 0.0;
   for (var i = 0; i < 100; i++) {
     let p = ro + rd * t;
     let d = map(p);
-    if (d.x < 0.0008 * t + 0.0004) { m = d.y; break; }
+    if (d.x < 0.0008 * t + 0.0004) { m = d.y; fr = d.z; break; }
     t += d.x * 0.9;
     if (t > 12.0) { break; }
   }
   if (t > 12.0) { m = 0.0; }
-  return vec2f(t, m);
+  return vec3f(t, m, fr);
 }
 
 fn ambOcc(p : vec3f, n : vec3f) -> f32 {
@@ -216,20 +219,33 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     let fres = f0 + (1.0 - f0) * pow(1.0 - cosT, 5.0);
 
     if (hit.y < 1.5) {
-      // ---- CLEAR glass: water-clear, sharply refractive ----
+      // ---- GLASS: one shading path, `frost` blends clear -> frosted continuously ----
+      let frost = clamp(hit.z, 0.0, 1.0);
       let refl = reflect(rd, n);
       let refr = refract(rd, n, 1.0 / 1.45);
-      let reflCol = env(refl) + glowRay(p + n * 0.01, refl, 8.0, 0.0);
 
       let thick = thickness(p, refr);
-      let absorb = exp(-vec3f(0.10, 0.06, 0.05) * thick * 2.0);   // barely-there tint
+      let absorbK = mix(vec3f(0.10, 0.06, 0.05) * 2.0, vec3f(0.30, 0.22, 0.18) * 1.6, frost);
+      let absorb = exp(-absorbK * thick);
       let exitP = p + refr * (thick + 0.01);
-      // crisp transmission: sharp halo sampling, no spread
-      let refrCol = (glowRay(exitP, refr, 10.0, 0.0) * 2.4 + env(refr) * 0.5) * absorb;
 
-      col = mix(refrCol, reflCol, clamp(fres * 1.5, 0.0, 1.0));
-      col += vec3f(1.0) * pow(1.0 - cosT, 4.0) * 0.06;            // neutral rim, no rainbow
-      col *= mix(0.85, 1.0, ao);
+      // transmission: spread widens with frost (glass BECOMES a diffuser)
+      let spread = frost * 0.55;
+      let refrCol = (glowRay(exitP, refr, 10.0, spread) * mix(2.4, 3.2, frost)
+                     + env(refr) * mix(0.5, 0.3, frost)) * absorb;
+
+      // reflection: sharp when clear, broad and dimmed when frosted
+      let reflCol = env(refl) * mix(1.0, 0.5, frost)
+                  + glowRay(p + n * 0.01, refl, 8.0, frost * 0.30) * mix(1.0, 0.8, frost);
+
+      // milk: only as frost rises
+      let milk = (vec3f(0.055, 0.06, 0.075) * ao + glowDiffuse(p, n) * 0.16) * frost;
+
+      col = mix(refrCol, reflCol, clamp(fres * mix(1.5, 0.9, frost), 0.0, 1.0)) + milk;
+      // rim: neutral on clear, faint iridescent accent emerging with frost
+      let rimW = pow(1.0 - cosT, 4.0);
+      col += mix(vec3f(1.0) * 0.06, film(cosT) * 0.055, frost) * rimW;
+      col *= mix(mix(0.85, 0.8, frost), 1.0, ao);
 
     } else if (hit.y < 2.5) {
       // ---- chrome ----
@@ -251,27 +267,6 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       // uniform emission with a whisper of limb softening — like an LED behind a diffuser
       col = emitterTint(id) * (2.6 * (0.84 + 0.16 * cosT));
 
-    } else {
-      // ---- FROSTED glass: even, milky transmission (the diffuser panel) ----
-      let refl = reflect(rd, n);
-      let refr = refract(rd, n, 1.0 / 1.45);
-
-      let thick = thickness(p, refr);
-      let absorb = exp(-vec3f(0.30, 0.22, 0.18) * thick * 1.6);
-      let exitP = p + refr * (thick + 0.01);
-      // WIDE spread = the frosting: lamp light smears evenly through the body
-      let refrCol = (glowRay(exitP, refr, 10.0, 0.55) * 3.2 + env(refr) * 0.3) * absorb;
-
-      // milk: soft ambient body + lamp diffuse on the surface
-      let milk = vec3f(0.055, 0.06, 0.075) * ao + glowDiffuse(p, n) * 0.16;
-
-      // soft, broad reflection only (no mirror sharpness on frosted)
-      let reflCol = env(refl) * 0.5 + glowRay(p + n * 0.01, refl, 8.0, 0.30) * 0.8;
-
-      col = refrCol + milk + reflCol * clamp(fres, 0.0, 1.0) * 0.7;
-      // iridescence lives HERE only: subtle grazing accent
-      col += film(cosT) * pow(1.0 - cosT, 4.0) * 0.055;
-      col *= mix(0.8, 1.0, ao);
     }
   }
 
