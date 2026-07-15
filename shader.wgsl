@@ -206,8 +206,9 @@ fn fs(in : VSOut) -> @location(0) vec4f {
   let ro = vec3f(0.0, 0.0, 3.4);
   let rd = normalize(vec3f(uv * 0.62, -1.0));
 
-  // background: ink studio + the lamps' atmospheric halos
-  var col = env(rd) * 0.35 + glowRay(ro, rd, 12.0, 0.0);
+  // background: clean ink — no atmospheric halo, so the lamps cut razor-crisp
+  // edges against it; their light only shows where it lands on surfaces.
+  var col = env(rd) * 0.22;
 
   let hit = march(ro, rd);
   if (hit.y > 0.5) {
@@ -256,7 +257,7 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       col *= mix(0.6, 1.0, ao);
 
     } else if (hit.y < 3.5) {
-      // ---- emissive lamp: evenly-lit diffused surface, crisp silhouette ----
+      // ---- emissive lamp: display-referred (bypasses tonemap below) ----
       var id = 0;
       var best = 1e9;
       let t = u.a.z;
@@ -264,8 +265,9 @@ fn fs(in : VSOut) -> @location(0) vec4f {
         let d = length(p - emitterPos(i, t));
         if (d < best) { best = d; id = i; }
       }
-      // uniform emission with a whisper of limb softening — like an LED behind a diffuser
-      col = emitterTint(id) * (2.6 * (0.84 + 0.16 * cosT));
+      // fully saturated, evenly lit, faint limb softening — a diffused LED at full brightness
+      let lampCol = emitterTint(id) * (1.0 - 0.12 * pow(1.0 - cosT, 3.0));
+      return vec4f(lampCol, 1.0);
 
     }
   }
