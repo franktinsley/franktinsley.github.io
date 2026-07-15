@@ -206,9 +206,8 @@ fn fs(in : VSOut) -> @location(0) vec4f {
   let ro = vec3f(0.0, 0.0, 3.4);
   let rd = normalize(vec3f(uv * 0.62, -1.0));
 
-  // background: clean ink — no atmospheric halo, so the lamps cut razor-crisp
-  // edges against it; their light only shows where it lands on surfaces.
-  var col = env(rd) * 0.22;
+  // background: one flat ink tone — no gradient, no glow; lamps cut razor edges.
+  var col = vec3f(0.0135, 0.0145, 0.019);
 
   let hit = march(ro, rd);
   if (hit.y > 0.5) {
@@ -272,11 +271,9 @@ fn fs(in : VSOut) -> @location(0) vec4f {
     }
   }
 
-  // tonemap + gamma + vignette
+  // tonemap + gamma (no vignette — flat background stays flat)
   col = col / (col + vec3f(0.85));
   col = pow(col, vec3f(1.0 / 2.2));
-  let vig = 1.0 - 0.35 * dot(uv * 0.55, uv * 0.55);
-  col *= vig;
 
   return vec4f(col, 1.0);
 }
