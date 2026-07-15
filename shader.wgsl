@@ -76,13 +76,13 @@ fn map(p : vec3f) -> vec3f {
   let dClear2 = sdSphere(p - mw, chaseR);                                 // frost 0
   let dFrost1 = sdSphere(p - p2, 0.34);                                   // frost 1
   let dFrost2 = sdSphere(p - p3, 0.28);                                   // frost 1
-  let dPanel  = sdSquircleBox(p - vec3f(0.0, -0.05, -0.35), vec3f(1.15, 0.55, 0.02), 0.08); // frost 1
+  let dPanel  = sdSquircleBox(p - vec3f(0.0, -0.05, -0.35), vec3f(1.08, 0.48, 0.005), 0.15); // frost 0 — clear slab
 
   var g = vec2f(dClear1, 0.0);
   g = sminMat(g.x, g.y, dClear2, 0.0, 0.42);
   g = sminMat(g.x, g.y, dFrost1, 1.0, 0.35);
   g = sminMat(g.x, g.y, dFrost2, 1.0, 0.35);
-  g = sminMat(g.x, g.y, dPanel,  1.0, 0.28);
+  g = sminMat(g.x, g.y, dPanel,  0.0, 0.28);
 
   // ---- satellites: a small family of physical materials ----
   // chrome (metal 0) and satin gold (metal 1) share one parametric metal path
