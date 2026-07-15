@@ -58,6 +58,16 @@ fn sminMat(d1 : f32, m1 : f32, d2 : f32, m2 : f32, k : f32) -> vec2f {
   return vec2f(d, m);
 }
 
+
+// smooth-fold a new part into the accumulated scene: geometry blends (smin),
+// the nearer side's material carries the neck — contacts read as wet, not clipped
+fn foldSmooth(a : vec3f, d : f32, cls : f32, prm : f32, k : f32) -> vec3f {
+  let h = clamp(0.5 + 0.5 * (d - a.x) / k, 0.0, 1.0);
+  let dist = mix(d, a.x, h) - k * h * (1.0 - h);
+  if (h > 0.5) { return vec3f(dist, a.y, a.z); }
+  return vec3f(dist, cls, prm);
+}
+
 // returns vec3(dist, materialClass, frost)  — class: 1 glass, 2 chrome, 3 lamp
 fn map(p : vec3f) -> vec3f {
   let t = u.a.z;
@@ -97,17 +107,14 @@ fn map(p : vec3f) -> vec3f {
   let ppos = vec3f(sin(t * 0.4 + 1.0) * 1.2, 0.85 + cos(t * 0.27) * 0.25, 0.5);
   let dPearl = sdSphere(p - ppos, 0.09);
 
-  // ---- emissive lamps (crisp surfaces) ----
-  var e = sdSphere(p - emitterPos(0, t), EMITTER_R);
-  e = min(e, sdSphere(p - emitterPos(1, t), EMITTER_R));
-  e = min(e, sdSphere(p - emitterPos(2, t), EMITTER_R));
-
   var out = vec3f(g.x, 1.0, g.y);
-  if (dChrome < out.x) { out = vec3f(dChrome, 2.0, 0.0); }
-  if (dGold   < out.x) { out = vec3f(dGold,   2.0, 1.0); }
-  if (dInk    < out.x) { out = vec3f(dInk,    4.0, 0.0); }
-  if (dPearl  < out.x) { out = vec3f(dPearl,  5.0, 0.0); }
-  if (e < out.x) { out = vec3f(e, 3.0, 0.0); }
+  out = foldSmooth(out, dChrome, 2.0, 0.0, 0.16);
+  out = foldSmooth(out, dGold,   2.0, 1.0, 0.16);
+  out = foldSmooth(out, dInk,    4.0, 0.0, 0.20);
+  out = foldSmooth(out, dPearl,  5.0, 0.0, 0.12);
+  out = foldSmooth(out, sdSphere(p - emitterPos(0, t), EMITTER_R), 3.0, 0.0, 0.10);
+  out = foldSmooth(out, sdSphere(p - emitterPos(1, t), EMITTER_R), 3.0, 0.0, 0.10);
+  out = foldSmooth(out, sdSphere(p - emitterPos(2, t), EMITTER_R), 3.0, 0.0, 0.10);
   return out;
 }
 
