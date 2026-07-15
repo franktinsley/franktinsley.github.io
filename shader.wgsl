@@ -241,15 +241,25 @@ fn ambOcc(p : vec3f, n : vec3f) -> f32 {
   return clamp(1.0 - occ * 1.6, 0.0, 1.0);
 }
 
-// interior thickness estimate (shared by both glasses)
+// interior crossing: adaptive march + bisection so the exit lands ON the surface
+// (coarse fixed steps quantize the exit point -> banding rings in refractions)
 fn thickness(p : vec3f, refr : vec3f) -> f32 {
+  var tIn = 0.01;
   var tt = 0.02;
-  for (var i = 0; i < 12; i++) {
+  for (var i = 0; i < 24; i++) {
     let dp = map(p + refr * tt).x;
-    if (dp > 0.001) { break; }
-    tt += max(-dp, 0.015);
+    if (dp > 0.0) { break; }
+    tIn = tt;
+    tt += max(-dp * 0.9, 0.008);
+    if (tt > 3.0) { break; }
   }
-  return tt;
+  var a = tIn;
+  var b = tt;
+  for (var i = 0; i < 6; i++) {
+    let m = 0.5 * (a + b);
+    if (map(p + refr * m).x < 0.0) { a = m; } else { b = m; }
+  }
+  return 0.5 * (a + b);
 }
 
 @fragment
@@ -282,7 +292,7 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       let thick = thickness(p, refr);
       let absorbK = mix(vec3f(0.10, 0.06, 0.05) * 1.2, vec3f(0.30, 0.22, 0.18) * 1.6, frost);
       let absorb = exp(-absorbK * thick);
-      let exitP = p + refr * (thick + 0.01);
+      let exitP = p + refr * thick;
 
       // CLEAR transmission: true transparency — exit the body and march the scene behind
       var clearCol = vec3f(0.0);
@@ -294,7 +304,8 @@ fn fs(in : VSOut) -> @location(0) vec4f {
           let rr = reflect(refr, nExit);
           clearCol = glowRay(exitP, rr, 8.0, 0.1) * 2.0 + env(rr) * 0.3;
         } else {
-          let ro2 = exitP + refr2 * 0.04;
+          // push off along the exit NORMAL so the secondary ray starts cleanly outside
+          let ro2 = exitP + nExit * 0.02 + refr2 * 0.01;
           let h2 = march(ro2, refr2);
           if (h2.y > 0.5) {
             let p2 = ro2 + refr2 * h2.x;
