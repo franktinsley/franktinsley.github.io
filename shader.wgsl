@@ -214,10 +214,11 @@ fn shadeSimple(p : vec3f, n : vec3f, rd : vec3f, cls : f32, prm : f32) -> vec3f 
        + vec3f(0.04, 0.045, 0.055) * glowDiffuse(p, n);
 }
 
-fn hash12(p : vec2f) -> f32 {
-  var p3 = fract(vec3f(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
+// interleaved gradient noise, golden-ratio-cycled per frame: grain with the
+// spectrum of a blur — the eye integrates it to smoothness at 60fps (Jimenez)
+fn ign(p : vec2f, t : f32) -> f32 {
+  let q = p + fract(t * 61.8034) * vec2f(23.14, 41.72);
+  return fract(52.9829189 * fract(0.06711056 * q.x + 0.00583715 * q.y));
 }
 
 // ---------- ray march ----------
@@ -251,7 +252,7 @@ fn ambOcc(p : vec3f, n : vec3f) -> f32 {
 // (coarse fixed steps quantize the exit point -> banding rings in refractions)
 fn thickness(p : vec3f, refr : vec3f, jit : f32) -> f32 {
   var tIn = 0.01;
-  var tt = 0.02 + jit * 0.014;
+  var tt = 0.02 + jit * 0.011;
   for (var i = 0; i < 16; i++) {
     let dp = map(p + refr * tt).x;
     if (dp > 0.0) { break; }
@@ -295,7 +296,7 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       let refl = reflect(rd, n);
       let refr = refract(rd, n, 1.0 / 1.45);
 
-      let jit = hash12(frag + fract(u.a.z) * 61.7);
+      let jit = ign(frag, u.a.z);
       let thick = thickness(p, refr, jit);
       let absorbK = mix(vec3f(0.10, 0.06, 0.05) * 1.2, vec3f(0.30, 0.22, 0.18) * 1.6, frost);
       let absorb = exp(-absorbK * thick);
