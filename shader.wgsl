@@ -1,11 +1,9 @@
-// v0 prototype — dark studio · liquid glass · drifting emissive glows
-// Fullscreen ray-marched SDF scene, WGSL.
+// v0.5 — dark studio · clear + frosted glass · crisp emissive lamps · squircle panel
+// Materials: 1 = clear glass · 2 = chrome · 3 = emissive lamp · 4 = frosted glass
 
 struct U {
-  // res.x, res.y, time, dpr
-  a : vec4f,
-  // mouse.x, mouse.y (pixels, smoothed), mouseDown, hover
-  b : vec4f,
+  a : vec4f,  // res.x, res.y, time, dpr
+  b : vec4f,  // mouse.x, mouse.y (pixels, smoothed), mouseDown, hover
 };
 @group(0) @binding(0) var<uniform> u : U;
 
@@ -27,41 +25,76 @@ fn smin(d1 : f32, d2 : f32, k : f32) -> f32 {
   return mix(d2, d1, h) - k * h * (1.0 - h);
 }
 fn sdSphere(p : vec3f, r : f32) -> f32 { return length(p) - r; }
-fn sdRoundBox(p : vec3f, b : vec3f, r : f32) -> f32 {
+
+// continuous-curvature rounded slab (L4 norm corners — squircle, not circular arcs)
+fn sdSquircleBox(p : vec3f, b : vec3f, r : f32) -> f32 {
   let q = abs(p) - b;
-  return length(max(q, vec3f(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
+  let qc = max(q, vec3f(0.0));
+  let q2 = qc * qc;
+  let len4 = pow(dot(q2, q2), 0.25);   // (x^4+y^4+z^4)^(1/4)
+  return len4 + min(max(q.x, max(q.y, q.z)), 0.0) - r;
 }
 
+// ---------- emitters (the "lamps") ----------
+fn emitterPos(i : i32, t : f32) -> vec3f {
+  if (i == 0) { return vec3f(sin(t * 0.21) * 1.8, cos(t * 0.16) * 1.0, -1.6); }
+  if (i == 1) { return vec3f(cos(t * 0.17 + 1.5) * 2.0, sin(t * 0.25) * 1.2, -2.0); }
+  return vec3f(sin(t * 0.12 + 3.9) * 1.4, cos(t * 0.21 + 1.0) * -1.1, -1.3);
+}
+fn emitterTint(i : i32) -> vec3f {
+  if (i == 0) { return vec3f(1.0, 0.18, 0.65); }   // magenta
+  if (i == 1) { return vec3f(0.15, 0.75, 1.0); }   // cyan
+  return vec3f(1.0, 0.62, 0.18);                    // amber
+}
+const EMITTER_R : f32 = 0.17;
+
 // ---------- scene ----------
-// returns vec2(dist, materialId): 1 = glass, 2 = chrome
+// returns vec2(dist, materialId)
 fn map(p : vec3f) -> vec2f {
   let t = u.a.z;
 
-  // pointer in world-ish space
   let res = u.a.xy;
   let m = (u.b.xy / res * 2.0 - 1.0) * vec2f(res.x / res.y, -1.0);
   let mw = vec3f(m * 1.4, 0.0);
 
-  // glass cluster: three drifting blobs + one pointer-chaser + a soft slab
+  // ---- glass group (one liquid body, mixed materials by nearest part) ----
   let p1 = vec3f(sin(t * 0.31) * 0.85, cos(t * 0.23) * 0.5, sin(t * 0.17) * 0.3);
   let p2 = vec3f(cos(t * 0.27) * 0.7, sin(t * 0.19) * -0.6, cos(t * 0.29) * 0.25);
   let p3 = vec3f(sin(t * 0.13 + 2.0) * 0.5, sin(t * 0.37) * 0.65, sin(t * 0.11) * 0.35);
 
-  var g = sdSphere(p - p1, 0.42);
-  g = smin(g, sdSphere(p - p2, 0.34), 0.35);
-  g = smin(g, sdSphere(p - p3, 0.28), 0.35);
-  // pointer chaser — swells slightly on press
+  let dClear1 = sdSphere(p - p1, 0.42);                                   // clear drifting blob
   let chaseR = 0.30 + u.b.z * 0.06 + sin(t * 1.7) * 0.015;
-  g = smin(g, sdSphere(p - mw, chaseR), 0.42);
-  // a whisper of a panel slab behind, part of the same liquid body
-  g = smin(g, sdRoundBox(p - vec3f(0.0, -0.05, -0.55), vec3f(1.1, 0.5, 0.015), 0.06), 0.24);
+  let dClear2 = sdSphere(p - mw, chaseR);                                 // clear pointer chaser
+  let dFrost1 = sdSphere(p - p2, 0.34);
+  let dFrost2 = sdSphere(p - p3, 0.28);
+  let dPanel  = sdSquircleBox(p - vec3f(0.0, -0.05, -0.35), vec3f(1.15, 0.55, 0.02), 0.08);
 
-  // small chrome satellite
+  var g = dClear1;
+  g = smin(g, dClear2, 0.42);
+  g = smin(g, dFrost1, 0.35);
+  g = smin(g, dFrost2, 0.35);
+  g = smin(g, dPanel, 0.28);
+
+  // nearest-part material for the group (clear=1, frosted=4)
+  var gm = 1.0;
+  var dNear = min(dClear1, dClear2);
+  let dF = min(dFrost1, min(dFrost2, dPanel));
+  if (dF < dNear) { gm = 4.0; }
+
+  // ---- chrome satellite ----
   let cpos = vec3f(cos(t * 0.5) * 1.5, sin(t * 0.8) * 0.9, 0.45 + sin(t * 0.33) * 0.2);
   let c = sdSphere(p - cpos, 0.12);
 
-  if (c < g) { return vec2f(c, 2.0); }
-  return vec2f(g, 1.0);
+  // ---- emissive lamps (crisp surfaces) ----
+  var e = sdSphere(p - emitterPos(0, t), EMITTER_R);
+  e = min(e, sdSphere(p - emitterPos(1, t), EMITTER_R));
+  e = min(e, sdSphere(p - emitterPos(2, t), EMITTER_R));
+
+  var d = g;
+  var mat = gm;
+  if (c < d) { d = c; mat = 2.0; }
+  if (e < d) { d = e; mat = 3.0; }
+  return vec2f(d, mat);
 }
 
 fn calcNormal(p : vec3f) -> vec3f {
@@ -73,46 +106,44 @@ fn calcNormal(p : vec3f) -> vec3f {
     e.xxx * map(p + e.xxx).x);
 }
 
-// ---------- emissive glow field (analytic volumetric integral) ----------
-// emitters drift BEHIND the glass; light integrates along any ray:
-//   integral of k / ((t+B)^2 + h) dt = k/sqrt(h) * (atan((T+B)/S) - atan(B/S))
-fn glowRay(ro : vec3f, rd : vec3f, tmax : f32) -> vec3f {
+// ---------- atmospheric halo around the lamps ----------
+// quartic falloff integrated along the ray (~1/d^3): tight physically-plausible
+// light spread hugging each lamp — the AIR glowing, not the lamp blurring.
+// `spread` widens the falloff (used by frosted glass as its diffuser).
+fn glowRay(ro : vec3f, rd : vec3f, tmax : f32, spread : f32) -> vec3f {
   let t = u.a.z;
   var col = vec3f(0.0);
-
-  // three drifting emitters: magenta, cyan, amber
-  var pos : array<vec3f, 3>;
-  var tint : array<vec3f, 3>;
-  pos[0] = vec3f(sin(t * 0.21) * 1.8, cos(t * 0.16) * 1.0, -1.6);
-  tint[0] = vec3f(1.0, 0.18, 0.65) * 0.030;                      // magenta
-  pos[1] = vec3f(cos(t * 0.17 + 1.5) * 2.0, sin(t * 0.25) * 1.2, -2.0);
-  tint[1] = vec3f(0.15, 0.75, 1.0) * 0.026;                      // cyan
-  pos[2] = vec3f(sin(t * 0.12 + 3.9) * 1.4, cos(t * 0.21 + 1.0) * -1.1, -1.3);
-  tint[2] = vec3f(1.0, 0.62, 0.18) * 0.022;                      // amber
-
-  // quartic emitter: k / (d^2 + r^2)^2 integrated along the ray (falls ~1/d^3:
-  // tight bokeh cores, no scene-wide haze).
-  //   f(u) = u / (2h(u^2+h)) + atan(u/sqrt(h)) / (2h*sqrt(h));  g = f(T+b) - f(b)
   for (var i = 0; i < 3; i++) {
-    let q = ro - pos[i];
+    let q = ro - emitterPos(i, t);
     let b = dot(q, rd);
     let c = dot(q, q);
-    let h = max(c - b * b, 0.0) + 0.075;
+    let h = max(c - b * b, 0.0) + 0.045 + spread;
     let s = inverseSqrt(h);
     let u1 = b;
     let u2 = tmax + b;
     let f1 = u1 / (2.0 * h * (u1 * u1 + h)) + atan(u1 * s) * s / (2.0 * h);
     let f2 = u2 / (2.0 * h * (u2 * u2 + h)) + atan(u2 * s) * s / (2.0 * h);
-    col += tint[i] * max(f2 - f1, 0.0);
+    col += emitterTint(i) * 0.011 * max(f2 - f1, 0.0);
+  }
+  return col;
+}
+
+// diffuse point-light from the lamps onto surfaces
+fn glowDiffuse(p : vec3f, n : vec3f) -> vec3f {
+  let t = u.a.z;
+  var col = vec3f(0.0);
+  for (var i = 0; i < 3; i++) {
+    let l = emitterPos(i, t) - p;
+    let d2 = dot(l, l);
+    let ndl = max(dot(n, l * inverseSqrt(d2)), 0.0);
+    col += emitterTint(i) * ndl / (1.0 + d2 * 0.6);
   }
   return col;
 }
 
 // ---------- procedural dark studio environment ----------
 fn env(rd : vec3f) -> vec3f {
-  // deep ink gradient
   var col = mix(vec3f(0.012, 0.014, 0.022), vec3f(0.05, 0.06, 0.09), rd.y * 0.5 + 0.5);
-  // two soft area lights (overhead strip + side fill)
   let strip = smoothstep(0.55, 0.95, rd.y) * smoothstep(0.6, 0.0, abs(rd.x));
   col += vec3f(0.55, 0.6, 0.7) * strip * 0.6;
   let side = pow(max(dot(rd, normalize(vec3f(-0.8, 0.15, 0.4))), 0.0), 24.0);
@@ -120,28 +151,7 @@ fn env(rd : vec3f) -> vec3f {
   return col;
 }
 
-// diffuse point-light contribution from the drifting emitters (lights the skins)
-fn glowDiffuse(p : vec3f, n : vec3f) -> vec3f {
-  let t = u.a.z;
-  var pos : array<vec3f, 3>;
-  var tint : array<vec3f, 3>;
-  pos[0] = vec3f(sin(t * 0.21) * 1.8, cos(t * 0.16) * 1.0, -1.6);
-  tint[0] = vec3f(1.0, 0.18, 0.65);
-  pos[1] = vec3f(cos(t * 0.17 + 1.5) * 2.0, sin(t * 0.25) * 1.2, -2.0);
-  tint[1] = vec3f(0.15, 0.75, 1.0);
-  pos[2] = vec3f(sin(t * 0.12 + 3.9) * 1.4, cos(t * 0.21 + 1.0) * -1.1, -1.3);
-  tint[2] = vec3f(1.0, 0.62, 0.18);
-  var col = vec3f(0.0);
-  for (var i = 0; i < 3; i++) {
-    let l = pos[i] - p;
-    let d2 = dot(l, l);
-    let ndl = max(dot(n, l * inverseSqrt(d2)), 0.0);
-    col += tint[i] * ndl / (1.0 + d2 * 0.6);
-  }
-  return col;
-}
-
-// thin-film iridescence tint
+// thin-film iridescence — accent only (frosted rims at grazing angles)
 fn film(cosT : f32) -> vec3f {
   let phase = cosT * 5.5;
   return 0.5 + 0.5 * cos(6.28318 * phase + vec3f(0.0, 2.094, 4.188));
@@ -162,8 +172,7 @@ fn march(ro : vec3f, rd : vec3f) -> vec2f {
   return vec2f(t, m);
 }
 
-fn softShadowAO(p : vec3f, n : vec3f) -> f32 {
-  // cheap AO from a few sdf samples along the normal
+fn ambOcc(p : vec3f, n : vec3f) -> f32 {
   var occ = 0.0;
   var w = 0.6;
   for (var i = 1; i <= 4; i++) {
@@ -174,71 +183,100 @@ fn softShadowAO(p : vec3f, n : vec3f) -> f32 {
   return clamp(1.0 - occ * 1.6, 0.0, 1.0);
 }
 
+// interior thickness estimate (shared by both glasses)
+fn thickness(p : vec3f, refr : vec3f) -> f32 {
+  var tt = 0.02;
+  for (var i = 0; i < 12; i++) {
+    let dp = map(p + refr * tt).x;
+    if (dp > 0.001) { break; }
+    tt += max(-dp, 0.015);
+  }
+  return tt;
+}
+
 @fragment
 fn fs(in : VSOut) -> @location(0) vec4f {
   let res = u.a.xy;
   let frag = in.pos.xy;
   let uv = (frag / res * 2.0 - 1.0) * vec2f(res.x / res.y, -1.0);
 
-  // camera
   let ro = vec3f(0.0, 0.0, 3.4);
   let rd = normalize(vec3f(uv * 0.62, -1.0));
 
-  // background: env + naked glow field (the drifting lights themselves)
-  var col = env(rd) * 0.35 + glowRay(ro, rd, 12.0);
+  // background: ink studio + the lamps' atmospheric halos
+  var col = env(rd) * 0.35 + glowRay(ro, rd, 12.0, 0.0);
 
   let hit = march(ro, rd);
   if (hit.y > 0.5) {
     let p = ro + rd * hit.x;
     let n = calcNormal(p);
     let cosT = clamp(dot(-rd, n), 0.0, 1.0);
-    let ao = softShadowAO(p, n);
+    let ao = ambOcc(p, n);
+    let f0 = 0.04;
+    let fres = f0 + (1.0 - f0) * pow(1.0 - cosT, 5.0);
 
     if (hit.y < 1.5) {
-      // ---- liquid glass ----
-      let f0 = 0.04;
-      var fres = f0 + (1.0 - f0) * pow(1.0 - cosT, 5.0);
-      let irid = film(cosT);
+      // ---- CLEAR glass: water-clear, sharply refractive ----
+      let refl = reflect(rd, n);
+      let refr = refract(rd, n, 1.0 / 1.45);
+      let reflCol = env(refl) + glowRay(p + n * 0.01, refl, 8.0, 0.0);
+
+      let thick = thickness(p, refr);
+      let absorb = exp(-vec3f(0.10, 0.06, 0.05) * thick * 2.0);   // barely-there tint
+      let exitP = p + refr * (thick + 0.01);
+      // crisp transmission: sharp halo sampling, no spread
+      let refrCol = (glowRay(exitP, refr, 10.0, 0.0) * 2.4 + env(refr) * 0.5) * absorb;
+
+      col = mix(refrCol, reflCol, clamp(fres * 1.5, 0.0, 1.0));
+      col += vec3f(1.0) * pow(1.0 - cosT, 4.0) * 0.06;            // neutral rim, no rainbow
+      col *= mix(0.85, 1.0, ao);
+
+    } else if (hit.y < 2.5) {
+      // ---- chrome ----
+      let refl = reflect(rd, n);
+      col = env(refl) * 1.4 + glowRay(p + n * 0.01, refl, 8.0, 0.0) * 3.0;
+      col += glowDiffuse(p, n) * 0.05;
+      col += vec3f(pow(1.0 - cosT, 4.0)) * 0.12;
+      col *= mix(0.6, 1.0, ao);
+
+    } else if (hit.y < 3.5) {
+      // ---- emissive lamp: evenly-lit diffused surface, crisp silhouette ----
+      var id = 0;
+      var best = 1e9;
+      let t = u.a.z;
+      for (var i = 0; i < 3; i++) {
+        let d = length(p - emitterPos(i, t));
+        if (d < best) { best = d; id = i; }
+      }
+      // uniform emission with a whisper of limb softening — like an LED behind a diffuser
+      col = emitterTint(id) * (2.6 * (0.84 + 0.16 * cosT));
+
+    } else {
+      // ---- FROSTED glass: even, milky transmission (the diffuser panel) ----
       let refl = reflect(rd, n);
       let refr = refract(rd, n, 1.0 / 1.45);
 
-      // reflection: studio env + glows
-      let reflCol = (env(refl) + glowRay(p + n * 0.01, refl, 8.0)) * mix(vec3f(1.0), irid, 0.55);
-
-      // transmission: glow field seen THROUGH the body + faint env, tinted by depth
-      var thick = 0.25;
-      {
-        // estimate thickness with a short inside-march
-        var tt = 0.02;
-        for (var i = 0; i < 12; i++) {
-          let dp = map(p + refr * tt).x;
-          if (dp > 0.001) { break; }
-          tt += max(-dp, 0.015);
-        }
-        thick = tt;
-      }
-      let absorb = exp(-vec3f(0.55, 0.28, 0.18) * thick * 2.6);   // inky teal-ish body
+      let thick = thickness(p, refr);
+      let absorb = exp(-vec3f(0.30, 0.22, 0.18) * thick * 1.6);
       let exitP = p + refr * (thick + 0.01);
-      let refrCol = (glowRay(exitP, refr, 10.0) * 2.0 + env(refr) * 0.22) * absorb;
+      // WIDE spread = the frosting: lamp light smears evenly through the body
+      let refrCol = (glowRay(exitP, refr, 10.0, 0.55) * 3.2 + env(refr) * 0.3) * absorb;
 
-      col = mix(refrCol, reflCol, clamp(fres * 1.6, 0.0, 1.0));
-      // the drifting lights kiss the glass skin
-      col += glowDiffuse(p, n) * 0.10 * mix(vec3f(1.0), irid, 0.4);
-      // bright fresnel rim kissed with iridescence
-      col += irid * pow(1.0 - cosT, 3.0) * 0.28;
-      col *= mix(0.75, 1.0, ao);
-    } else {
-      // ---- chrome ----
-      let refl = reflect(rd, n);
-      col = (env(refl) * 1.4 + glowRay(p + n * 0.01, refl, 8.0) * 3.0);
-      col += glowDiffuse(p, n) * 0.06;
-      col += vec3f(pow(1.0 - cosT, 4.0)) * 0.15;
-      col *= mix(0.6, 1.0, ao);
+      // milk: soft ambient body + lamp diffuse on the surface
+      let milk = vec3f(0.055, 0.06, 0.075) * ao + glowDiffuse(p, n) * 0.16;
+
+      // soft, broad reflection only (no mirror sharpness on frosted)
+      let reflCol = env(refl) * 0.5 + glowRay(p + n * 0.01, refl, 8.0, 0.30) * 0.8;
+
+      col = refrCol + milk + reflCol * clamp(fres, 0.0, 1.0) * 0.7;
+      // iridescence lives HERE only: subtle grazing accent
+      col += film(cosT) * pow(1.0 - cosT, 4.0) * 0.055;
+      col *= mix(0.8, 1.0, ao);
     }
   }
 
   // tonemap + gamma + vignette
-  col = col / (col + vec3f(0.85));                 // reinhard-ish
+  col = col / (col + vec3f(0.85));
   col = pow(col, vec3f(1.0 / 2.2));
   let vig = 1.0 - 0.35 * dot(uv * 0.55, uv * 0.55);
   col *= vig;
