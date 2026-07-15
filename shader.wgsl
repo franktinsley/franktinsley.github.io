@@ -84,9 +84,18 @@ fn map(p : vec3f) -> vec3f {
   g = sminMat(g.x, g.y, dFrost2, 1.0, 0.35);
   g = sminMat(g.x, g.y, dPanel,  1.0, 0.28);
 
-  // ---- chrome satellite ----
+  // ---- satellites: a small family of physical materials ----
+  // chrome (metal 0) and satin gold (metal 1) share one parametric metal path
   let cpos = vec3f(cos(t * 0.5) * 1.5, sin(t * 0.8) * 0.9, 0.45 + sin(t * 0.33) * 0.2);
-  let c = sdSphere(p - cpos, 0.12);
+  let dChrome = sdSphere(p - cpos, 0.12);
+  let gpos = vec3f(cos(t * 0.23 + 2.5) * 1.9, sin(t * 0.31 + 1.0) * 1.1, 0.3 + cos(t * 0.19) * 0.3);
+  let dGold = sdSphere(p - gpos, 0.16);
+  // matte ink ceramic — soft velvet dark
+  let ipos = vec3f(sin(t * 0.15 + 4.5) * 1.7, -0.9 + sin(t * 0.22) * 0.3, 0.1);
+  let dInk = sdSphere(p - ipos, 0.22);
+  // small pearl
+  let ppos = vec3f(sin(t * 0.4 + 1.0) * 1.2, 0.85 + cos(t * 0.27) * 0.25, 0.5);
+  let dPearl = sdSphere(p - ppos, 0.09);
 
   // ---- emissive lamps (crisp surfaces) ----
   var e = sdSphere(p - emitterPos(0, t), EMITTER_R);
@@ -94,7 +103,10 @@ fn map(p : vec3f) -> vec3f {
   e = min(e, sdSphere(p - emitterPos(2, t), EMITTER_R));
 
   var out = vec3f(g.x, 1.0, g.y);
-  if (c < out.x) { out = vec3f(c, 2.0, 0.0); }
+  if (dChrome < out.x) { out = vec3f(dChrome, 2.0, 0.0); }
+  if (dGold   < out.x) { out = vec3f(dGold,   2.0, 1.0); }
+  if (dInk    < out.x) { out = vec3f(dInk,    4.0, 0.0); }
+  if (dPearl  < out.x) { out = vec3f(dPearl,  5.0, 0.0); }
   if (e < out.x) { out = vec3f(e, 3.0, 0.0); }
   return out;
 }
@@ -126,6 +138,20 @@ fn glowRay(ro : vec3f, rd : vec3f, tmax : f32, spread : f32) -> vec3f {
     let f1 = u1 / (2.0 * h * (u1 * u1 + h)) + atan(u1 * s) * s / (2.0 * h);
     let f2 = u2 / (2.0 * h * (u2 * u2 + h)) + atan(u2 * s) * s / (2.0 * h);
     col += emitterTint(i) * 0.011 * max(f2 - f1, 0.0);
+  }
+  return col;
+}
+
+// specular highlights from the lamps (Blinn) — the hot sparkle that sells "physical"
+fn glowSpec(p : vec3f, n : vec3f, rd : vec3f, shininess : f32) -> vec3f {
+  let t = u.a.z;
+  var col = vec3f(0.0);
+  for (var i = 0; i < 3; i++) {
+    let l = emitterPos(i, t) - p;
+    let d2 = dot(l, l);
+    let ln = l * inverseSqrt(d2);
+    let hv = normalize(ln - rd);
+    col += emitterTint(i) * pow(max(dot(n, hv), 0.0), shininess) / (1.0 + d2 * 0.3);
   }
   return col;
 }
@@ -248,11 +274,20 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       col *= mix(mix(0.85, 0.8, frost), 1.0, ao);
 
     } else if (hit.y < 2.5) {
-      // ---- chrome ----
+      // ---- METAL: parametric — 0 = polished chrome, 1 = satin gold ----
+      let metal = clamp(hit.z, 0.0, 1.0);
+      let rough = mix(0.05, 0.35, metal);
+      let f0tint = mix(vec3f(0.95, 0.96, 0.97), vec3f(1.0, 0.72, 0.32), metal);
       let refl = reflect(rd, n);
-      col = env(refl) * 1.4 + glowRay(p + n * 0.01, refl, 8.0, 0.0) * 3.0;
-      col += glowDiffuse(p, n) * 0.05;
-      col += vec3f(pow(1.0 - cosT, 4.0)) * 0.12;
+
+      // roughness fades sharp env reflection toward a soft ambient, and widens lamp glints
+      let envAvg = vec3f(0.035, 0.04, 0.055);
+      let reflCol = mix(env(refl), envAvg, clamp(rough * 1.8, 0.0, 1.0))
+                  + glowRay(p + n * 0.01, refl, 8.0, rough * 0.5) * mix(3.0, 2.0, metal);
+      col = f0tint * reflCol * mix(1.4, 2.4, metal);   // satin needs more gain than mirror
+      col += f0tint * glowSpec(p, n, rd, mix(420.0, 48.0, rough)) * mix(1.2, 0.9, rough);
+      col += f0tint * glowDiffuse(p, n) * 0.05;
+      col += f0tint * pow(1.0 - cosT, 5.0) * 0.15;
       col *= mix(0.6, 1.0, ao);
 
     } else if (hit.y < 3.5) {
@@ -268,6 +303,23 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       let lampCol = emitterTint(id) * (1.0 - 0.12 * pow(1.0 - cosT, 3.0));
       return vec4f(lampCol, 1.0);
 
+    } else if (hit.y < 4.5) {
+      // ---- MATTE INK ceramic: velvet dark, lit only by lamps + soft sheen ----
+      let albedo = vec3f(0.05, 0.052, 0.066);
+      let amb = vec3f(0.10, 0.11, 0.14);
+      col = albedo * (amb * 2.0 * ao + glowDiffuse(p, n) * 1.1);
+      col += vec3f(0.6, 0.65, 0.75) * pow(1.0 - cosT, 3.5) * 0.045;   // velvet sheen rim
+      col += glowSpec(p, n, rd, 24.0) * 0.045;                         // broad soft glints
+      col *= mix(0.7, 1.0, ao);
+
+    } else {
+      // ---- PEARL: soft white, tight glints, whisper of nacre ----
+      let base = vec3f(0.72, 0.73, 0.76);
+      col = base * (vec3f(0.10, 0.11, 0.14) * 4.2 * ao + glowDiffuse(p, n) * 1.5);
+      col += glowSpec(p, n, rd, 160.0) * 0.9;
+      col += env(reflect(rd, n)) * 0.18;
+      col += film(cosT) * pow(1.0 - cosT, 2.5) * 0.06;                 // nacre accent
+      col *= mix(0.8, 1.0, ao);
     }
   }
 
