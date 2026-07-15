@@ -10,7 +10,7 @@ async function init() {
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: 'opaque' });
 
-  const code = await (await fetch('shader.wgsl?v=18548a9-161532')).text();
+  const code = await (await fetch('shader.wgsl?v=b44120e-163214')).text();
   const module = device.createShaderModule({ code });
   const info = await module.getCompilationInfo();
   for (const m of info.messages) {
@@ -38,7 +38,7 @@ async function init() {
   addEventListener('pointerdown', e => { mouse.down = 1; target.x = e.clientX; target.y = e.clientY; });
   addEventListener('pointerup', () => { mouse.down = 0; });
 
-  const DPR_CAP = 1.5;
+  const DPR_CAP = 1.2;
   function resize() {
     const dpr = Math.min(devicePixelRatio || 1, DPR_CAP);
     const w = Math.floor(canvas.clientWidth * dpr);

@@ -219,21 +219,21 @@ fn march(ro : vec3f, rd : vec3f) -> vec3f {
   var t = 0.0;
   var m = 0.0;
   var fr = 0.0;
-  for (var i = 0; i < 100; i++) {
+  for (var i = 0; i < 80; i++) {
     let p = ro + rd * t;
     let d = map(p);
     if (d.x < 0.0008 * t + 0.0004) { m = d.y; fr = d.z; break; }
     t += d.x * 0.9;
-    if (t > 12.0) { break; }
+    if (t > 9.0) { break; }
   }
-  if (t > 12.0) { m = 0.0; }
+  if (t > 9.0) { m = 0.0; }
   return vec3f(t, m, fr);
 }
 
 fn ambOcc(p : vec3f, n : vec3f) -> f32 {
   var occ = 0.0;
   var w = 0.6;
-  for (var i = 1; i <= 4; i++) {
+  for (var i = 1; i <= 3; i++) {
     let h = 0.06 * f32(i);
     occ += (h - map(p + n * h).x) * w;
     w *= 0.65;
@@ -246,7 +246,7 @@ fn ambOcc(p : vec3f, n : vec3f) -> f32 {
 fn thickness(p : vec3f, refr : vec3f) -> f32 {
   var tIn = 0.01;
   var tt = 0.02;
-  for (var i = 0; i < 24; i++) {
+  for (var i = 0; i < 16; i++) {
     let dp = map(p + refr * tt).x;
     if (dp > 0.0) { break; }
     tIn = tt;
@@ -255,7 +255,7 @@ fn thickness(p : vec3f, refr : vec3f) -> f32 {
   }
   var a = tIn;
   var b = tt;
-  for (var i = 0; i < 6; i++) {
+  for (var i = 0; i < 4; i++) {
     let m = 0.5 * (a + b);
     if (map(p + refr * m).x < 0.0) { a = m; } else { b = m; }
   }
@@ -316,9 +316,22 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       }
 
       // FROSTED transmission: the diffuser — lamp light spread wide and even
-      let frostCol = glowRay(exitP, refr, 10.0, 0.55) * 3.2 + env(refr) * 0.3;
+      let frostCol = glowRay(exitP, refr, 10.0, 0.55) * 4.6 + env(refr) * 0.3;
 
       let refrCol = mix(clearCol, frostCol, smoothstep(0.15, 0.75, frost)) * absorb;
+
+      // backlight: a lamp BEHIND a diffuse body blooms through it toward the viewer
+      var backlight = vec3f(0.0);
+      if (frost > 0.05) {
+        let tt = u.a.z;
+        for (var i = 0; i < 3; i++) {
+          let l = emitterPos(i, tt) - p;
+          let d2 = dot(l, l);
+          let through = max(dot(rd, l * inverseSqrt(d2)), 0.0);
+          backlight += emitterTint(i) * pow(through, 3.5) / (0.35 + d2 * 0.8);
+        }
+        backlight *= frost * 0.85;
+      }
 
       // reflection: sharp when clear, broad and dimmed when frosted
       let reflCol = env(refl) * mix(1.0, 0.5, frost)
@@ -327,7 +340,7 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       // milk: only as frost rises
       let milk = (vec3f(0.055, 0.06, 0.075) * ao + glowDiffuse(p, n) * 0.16) * frost;
 
-      col = mix(refrCol, reflCol, clamp(fres * mix(1.5, 0.9, frost), 0.0, 1.0)) + milk;
+      col = mix(refrCol, reflCol, clamp(fres * mix(1.5, 0.9, frost), 0.0, 1.0)) + milk + backlight;
       // rim: neutral on clear, faint iridescent accent emerging with frost
       let rimW = pow(1.0 - cosT, 4.0);
       col += mix(vec3f(1.0) * 0.06, film(cosT) * 0.055, frost) * rimW;
