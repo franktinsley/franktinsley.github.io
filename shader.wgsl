@@ -185,6 +185,35 @@ fn film(cosT : f32) -> vec3f {
   return 0.5 + 0.5 * cos(6.28318 * phase + vec3f(0.0, 2.094, 4.188));
 }
 
+// simplified shading for surfaces seen THROUGH clear glass (no recursion)
+fn shadeSimple(p : vec3f, n : vec3f, rd : vec3f, cls : f32, prm : f32) -> vec3f {
+  let cosT = clamp(dot(-rd, n), 0.0, 1.0);
+  if (cls > 2.5 && cls < 3.5) {
+    // lamp: stays vivid through the glass
+    var id = 0;
+    var best = 1e9;
+    let t = u.a.z;
+    for (var i = 0; i < 3; i++) {
+      let d = length(p - emitterPos(i, t));
+      if (d < best) { best = d; id = i; }
+    }
+    return emitterTint(id) * 4.0;
+  } else if (cls > 1.5 && cls < 2.5) {
+    let f0tint = mix(vec3f(0.95, 0.96, 0.97), vec3f(1.0, 0.72, 0.32), prm);
+    return f0tint * (env(reflect(rd, n)) * 1.2 + glowSpec(p, n, rd, 100.0));
+  } else if (cls > 3.5 && cls < 4.5) {
+    return vec3f(0.05, 0.052, 0.066) * (vec3f(0.10, 0.11, 0.14) * 2.0 + glowDiffuse(p, n));
+  } else if (cls > 4.5) {
+    return vec3f(0.72, 0.73, 0.76) * (vec3f(0.10, 0.11, 0.14) * 4.2 + glowDiffuse(p, n) * 1.5)
+         + glowSpec(p, n, rd, 160.0) * 0.9;
+  }
+  // glass seen through glass: frosted approximation, no recursion
+  let fres = 0.04 + 0.96 * pow(1.0 - cosT, 5.0);
+  return glowRay(p, refract(rd, n, 1.0 / 1.45), 8.0, 0.4) * 2.5
+       + env(reflect(rd, n)) * fres
+       + vec3f(0.04, 0.045, 0.055) * glowDiffuse(p, n);
+}
+
 // ---------- ray march ----------
 fn march(ro : vec3f, rd : vec3f) -> vec3f {
   var t = 0.0;
@@ -251,14 +280,34 @@ fn fs(in : VSOut) -> @location(0) vec4f {
       let refr = refract(rd, n, 1.0 / 1.45);
 
       let thick = thickness(p, refr);
-      let absorbK = mix(vec3f(0.10, 0.06, 0.05) * 2.0, vec3f(0.30, 0.22, 0.18) * 1.6, frost);
+      let absorbK = mix(vec3f(0.10, 0.06, 0.05) * 1.2, vec3f(0.30, 0.22, 0.18) * 1.6, frost);
       let absorb = exp(-absorbK * thick);
       let exitP = p + refr * (thick + 0.01);
 
-      // transmission: spread widens with frost (glass BECOMES a diffuser)
-      let spread = frost * 0.55;
-      let refrCol = (glowRay(exitP, refr, 10.0, spread) * mix(2.4, 3.2, frost)
-                     + env(refr) * mix(0.5, 0.3, frost)) * absorb;
+      // CLEAR transmission: true transparency — exit the body and march the scene behind
+      var clearCol = vec3f(0.0);
+      if (frost < 0.75) {
+        let nExit = calcNormal(exitP);
+        let refr2 = refract(refr, -nExit, 1.45);
+        if (dot(refr2, refr2) < 0.5) {
+          // total internal reflection: glide along the inside
+          let rr = reflect(refr, nExit);
+          clearCol = glowRay(exitP, rr, 8.0, 0.1) * 2.0 + env(rr) * 0.3;
+        } else {
+          let ro2 = exitP + refr2 * 0.04;
+          let h2 = march(ro2, refr2);
+          if (h2.y > 0.5) {
+            let p2 = ro2 + refr2 * h2.x;
+            clearCol = shadeSimple(p2, calcNormal(p2), refr2, h2.y, h2.z);
+          }
+          // miss = the black void, exactly like outside the glass
+        }
+      }
+
+      // FROSTED transmission: the diffuser — lamp light spread wide and even
+      let frostCol = glowRay(exitP, refr, 10.0, 0.55) * 3.2 + env(refr) * 0.3;
+
+      let refrCol = mix(clearCol, frostCol, smoothstep(0.15, 0.75, frost)) * absorb;
 
       // reflection: sharp when clear, broad and dimmed when frosted
       let reflCol = env(refl) * mix(1.0, 0.5, frost)
