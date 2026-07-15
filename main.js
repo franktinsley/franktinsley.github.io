@@ -10,7 +10,7 @@ async function init() {
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: 'opaque' });
 
-  const code = await (await fetch('shader.wgsl?v=728795f-160757')).text();
+  const code = await (await fetch('shader.wgsl?v=115ac20-160909')).text();
   const module = device.createShaderModule({ code });
   const info = await module.getCompilationInfo();
   for (const m of info.messages) {
@@ -70,7 +70,7 @@ async function init() {
     const pass = enc.beginRenderPass({
       colorAttachments: [{
         view: ctx.getCurrentTexture().createView(),
-        loadOp: 'clear', clearValue: { r: 0.02, g: 0.03, b: 0.04, a: 1 },
+        loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 1 },
         storeOp: 'store',
       }],
     });
