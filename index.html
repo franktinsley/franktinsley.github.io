@@ -3,60 +3,195 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#000000">
-<title>Frank Tinsley — Real-Time Graphics</title>
-<style>
-  :root { color-scheme: dark; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; background: #000; overflow: hidden; }
-  body { height: 100dvh; }
-  canvas#gfx {
-    position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh;
-    display: block; touch-action: none;
-  }
-  .overlay {
-    position: fixed; inset: 0; display: grid; place-items: center;
-    pointer-events: none; z-index: 2;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, system-ui, sans-serif;
-  }
-  .hero { text-align: center; }
-  .hero h1 {
-    font-size: clamp(2.2rem, 6vw, 4.5rem);
-    font-weight: 700; letter-spacing: -0.02em;
-    color: #f2f4f8;
-    text-shadow: 0 2px 24px rgba(0,0,0,.55);
-  }
-  .hero p {
-    margin-top: .6rem;
-    font-size: clamp(.95rem, 2vw, 1.25rem);
-    font-weight: 400; letter-spacing: .06em;
-    color: rgba(226,232,244,.72);
-    text-shadow: 0 1px 12px rgba(0,0,0,.6);
-  }
-  .tag {
-    position: fixed; bottom: 14px; right: 16px; z-index: 3;
-    font: 11px/1 ui-monospace, monospace; color: rgba(200,210,230,.4);
-  }
-  #nogpu {
-    position: fixed; inset: 0; display: none; place-items: center; z-index: 4;
-    background: radial-gradient(ellipse at 50% 40%, #10131c, #06070a);
-    color: #c8d0e0; font-family: system-ui, sans-serif; text-align: center; padding: 2rem;
-  }
-</style>
+<meta name="theme-color" content="#0a0a0f">
+<title>Frank Tinsley — Real-Time Graphics Engineer</title>
+<meta name="description" content="Real-time graphics engineer. This page is rendered live by my own SDF ray marcher in WebGPU.">
+<meta property="og:title" content="Frank Tinsley — Real-Time Graphics Engineer">
+<meta property="og:description" content="Real-time graphics engineer. This page is rendered live by my own SDF ray marcher in WebGPU.">
+<link rel="stylesheet" href="css/site.css?v=c4993e4-181612">
+<script type="module" src="js/main.js?v=c4993e4-181612"></script>
 </head>
 <body>
-<canvas id="gfx"></canvas>
-<div class="overlay">
-  <div class="hero">
-    <h1>Frank Tinsley</h1>
-    <p>REAL-TIME GRAPHICS ENGINEERING · INTERACTION DESIGN</p>
+<a class="skip" href="#main">Skip to content</a>
+
+<canvas id="gfx" aria-hidden="true"></canvas>
+
+<header class="chrome">
+  <div class="chrome-left">
+    <a class="wordmark" href="#top">FRANK TINSLEY</a>
+    <span class="chrome-tag">REAL-TIME GRAPHICS</span>
   </div>
-</div>
-<div class="tag">v0 prototype · WebGPU</div>
-<div id="nogpu"><div>
-  <h2>WebGPU not available in this browser</h2>
-  <p style="margin-top:.8rem;opacity:.7">Fallback path (WebGL2 / video) lands in v1.</p>
-</div></div>
-<script type="module" src="main.js?v=0ff1673-164851"></script>
+  <nav class="chrome-links" aria-label="Quick links">
+    <a href="mailto:franktinsley@me.com">email</a>
+    <a class="wide-only" href="assets/resume.pdf">resume (pdf)</a>
+    <a class="wide-only" href="https://linkedin.com/in/franktinsley">linkedin</a>
+  </nav>
+</header>
+
+<nav class="spine" aria-label="Sections">
+  <a href="#top"><span class="vh">Top</span></a>
+  <a href="#work"><span class="vh">Selected work</span></a>
+  <a href="#career"><span class="vh">Career</span></a>
+  <a href="#colophon"><span class="vh">Colophon</span></a>
+  <a href="#contact"><span class="vh">Contact</span></a>
+</nav>
+
+<main id="main">
+
+  <!-- ======================= 00 · MASTHEAD ======================= -->
+  <section id="top" class="masthead">
+    <div class="panel" data-sdf="masthead">
+      <h1>Frank Tinsley</h1>
+      <p class="lede"><strong>Real-time graphics engineer.</strong> Shaders, engines, and the occasional FPGA.</p>
+      <p class="pitch">
+        <span class="tier-copy tier-copy-live">This page is drawn by my own renderer. Every panel behind
+        this text is a signed-distance field, ray-marched live in a WebGPU fragment shader — parametric
+        glass and lamplight; no textures, no bloom pass. The text is HTML. Everything else is the work
+        sample.</span>
+        <span class="tier-copy tier-copy-static">This page is normally drawn live by my own renderer —
+        every panel behind this text is a signed-distance field, ray-marched in a WebGPU fragment
+        shader. Your browser isn't running it right now, so you're seeing the flat version. The text is
+        HTML either way.</span>
+      </p>
+      <div class="cta-row">
+        <a class="pill pill-primary" href="mailto:franktinsley@me.com">Email — franktinsley@me.com</a>
+        <a class="pill" href="https://linkedin.com/in/franktinsley">LinkedIn</a>
+        <a class="pill" href="assets/resume.pdf">Resume (PDF)</a>
+      </div>
+      <nav class="anchor-row" aria-label="Sections (inline)">
+        <a href="#work">WORK</a> · <a href="#career">CAREER</a> ·
+        <a href="#colophon">COLOPHON</a> · <a href="#contact">CONTACT</a>
+      </nav>
+      <dl class="spec-strip">
+        <dt>RENDERER</dt><dd>SDF ray march · WebGPU / WGSL · 1 march pass + 1 composite (scale · tonemap · dither)</dd>
+        <dt>LIGHT</dt><dd>3 emissive lamps · closed-form glow integral · 0 bloom passes</dd>
+        <dt>GLASS</dt><dd>&le;1 refracted bounce per pixel · Beer–Lambert absorption</dd>
+        <dt>BUDGET</dt><dd>60 fps target on Apple Silicon · adaptive elsewhere · idles to 0 GPU</dd>
+      </dl>
+      <p class="readout" data-readout>render&nbsp;&nbsp;&nbsp;STATIC — the live renderer needs JavaScript + WebGPU · text is HTML either way</p>
+      <p class="mono-line">PORTLAND, OR · RELOCATION-READY (BAY AREA) · REMOTE</p>
+    </div>
+    <div class="scroll-cue" aria-hidden="true">&#9662;</div>
+  </section>
+
+  <!-- ======================= 01 · SELECTED WORK ======================= -->
+  <section id="work">
+    <h2 class="eyebrow">01 — SELECTED WORK</h2>
+    <div class="panel" data-sdf="work">
+      <article>
+        <h3>SDF modeling engine</h3>
+        <p class="mono-line">SWIFT + METAL · ~50,000 LINES · ~650 COMMITS · iOS / iPadOS / macOS · 2026</p>
+        <p>A real-time signed-distance-field modeling engine and app, built solo in about four months:
+        ray-marched implicit surfaces, smooth booleans and organic blends, procedural geometry, and
+        marching-cubes export to STL/OBJ. I wrote the full Metal stack — compute, fragment, and vertex —
+        and tuned it to hold interactive frame rates on phone GPUs, not just desktops. The renderer
+        behind this page is its little sibling. The engine is unreleased; code and a live demo are
+        available on request.</p>
+      </article>
+      <hr class="hairline">
+      <article>
+        <h3>Konami System 573, reimplemented on an FPGA</h3>
+        <p class="mono-line">~22,000 LINES CUSTOM RTL · ~1 MONTH · MiSTer / DE10-NANO · VERIFIED FRAME-ACCURATE VS MAME ON HARDWARE</p>
+        <p>A re-implementation of Konami's System 573 — the PlayStation-derived arcade board behind
+        Dance Dance Revolution — as a MiSTer FPGA core. Roughly 22,000 lines of custom RTL in about a
+        month, through an AI-accelerated workflow built around automated verification: changes proven
+        frame-accurate against the MAME reference emulator by frame-diff tooling running against the
+        real FPGA. Digital design is a different discipline from shading; the transferable part was
+        making the verification loop fast enough to iterate like software.</p>
+        <p class="mono-line">SOURCE — AVAILABLE ON REQUEST</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ======================= 02 · CAREER ======================= -->
+  <section id="career">
+    <h2 class="eyebrow">02 — CAREER</h2>
+    <div class="panel" data-sdf="career">
+      <p>Fifteen years on the art–engineering boundary: prototype fast, then harden for frame rate.</p>
+      <dl class="timeline">
+        <dt>2025–26</dt>
+        <dd><strong>Meta</strong> (contract) — Technical Artist on <strong>Meta Avatars</strong>:
+        real-time interactivity and avatar rendering; built a visual in-editor tool for authoring mock
+        events and driving them at runtime to test the live-avatar systems.</dd>
+        <dt>2022–23</dt>
+        <dd><strong>Meta</strong> (contract) — AR subject-matter expert on Spark AR Studio; built
+        hands-on curriculum training the next generation of AR creators.</dd>
+        <dt>2021–22</dt>
+        <dd><strong>Microsoft</strong> — Mixed reality developer.</dd>
+        <dt>2018–20</dt>
+        <dd><strong>Camera IQ</strong> — Runtime engineer across Unity/C#, JavaScript, and Go; created
+        <strong>ARX</strong>, an API-neutral interchange format for AR experiences spanning Lens Studio
+        and Spark AR.</dd>
+        <dt>2009–18</dt>
+        <dd><strong>CodeStep</strong> (independent) — A decade of Unity: interactive 3D installations
+        for a major athletic-shoe brand exhibited worldwide, retail photo-booth software, and games —
+        one acquired by GSN.</dd>
+      </dl>
+      <p><a class="pill" href="assets/resume.pdf">Resume (PDF)</a></p>
+    </div>
+  </section>
+
+  <!-- ======================= 03 · COLOPHON ======================= -->
+  <section id="colophon">
+    <h2 class="eyebrow">03 — COLOPHON: HOW THIS PAGE IS DRAWN</h2>
+    <div class="panel" data-sdf="colophon">
+      <p>The background isn't a video or a texture. It's a scene — and this panel you're reading it on
+      is one of its objects.</p>
+      <ul class="colophon-list">
+        <li><strong>One scene, two passes.</strong> Everything behind the text — panels and lamps — is a
+        single ray-marched signed-distance scene, evaluated in one WebGPU fragment pass. A second small
+        pass scales it to your screen, tonemaps, and dithers. That's the entire pipeline: no textures,
+        no bloom, no post-effect chain.</li>
+        <li><strong>Parametric materials.</strong> Clear and frosted glass are one shading path with a
+        continuously blended frost parameter; chrome and gold share one metal path. The blend weight
+        rides the same smooth-minimum that merges the geometry, so materials transition across blend
+        necks without seams.</li>
+        <li><strong>Honest refraction.</strong> Clear glass earns one refracted bounce per pixel: a
+        march through its own interior, bisection-refined so the exit lands on the surface, then a
+        single capped march out to whatever actually sits behind — total internal reflection included.
+        Reflection rays never re-march; they sample an analytic environment. That's the performance
+        contract, stated exactly.</li>
+        <li><strong>The periphery is the cheap surface.</strong> Past the frost threshold, the
+        refracted bounce switches itself off and the glass becomes a pure diffuser. Every panel you're
+        not reading rests past that threshold, so the expensive clear-glass path only ever runs on the
+        one panel in focus — the depth-of-field hierarchy and the performance optimization are the
+        same rule.</li>
+        <li><strong>Analytic lamplight.</strong> The halo around each lamp is a closed-form line
+        integral evaluated along the ray — true volumetric falloff with zero bloom passes. Frosted glass
+        reuses the same integral with a widened spread: the frost <em>is</em> the diffuser.</li>
+        <li><strong>HTML first.</strong> Every word on this page is plain HTML; the canvas sits behind
+        it and never draws a letter. The DOM owns layout — the glass is re-fitted to the text's real
+        geometry, so zoom, font scaling, find-in-page, and screen readers just work.</li>
+        <li><strong>A disciplined budget.</strong> 60 fps target on Apple Silicon, adaptive resolution
+        elsewhere — the readout below is measured live, not asserted, and it only prints numbers the
+        page can actually measure. When you stop scrolling, rendering stops entirely; the readout says
+        so.</li>
+      </ul>
+      <p class="readout" data-readout>render&nbsp;&nbsp;&nbsp;STATIC — the live renderer needs JavaScript + WebGPU · text is HTML either way</p>
+      <p>View source — ES modules, no bundler, static files on GitHub Pages. The second demo.</p>
+    </div>
+  </section>
+
+  <!-- ======================= 04 · CONTACT ======================= -->
+  <section id="contact">
+    <h2 class="eyebrow">04 — CONTACT</h2>
+    <div class="panel" data-sdf="contact">
+      <p>If you're building a renderer, an engine team, or anything that has to hit frame rate on real
+      hardware — email is the fastest way to reach me.</p>
+      <p><a class="pill pill-lens" id="email-lens" href="mailto:franktinsley@me.com">franktinsley@me.com</a></p>
+      <div class="cta-row">
+        <a class="pill" href="https://linkedin.com/in/franktinsley">LinkedIn</a>
+        <a class="pill" href="assets/resume.pdf">Resume (PDF)</a>
+      </div>
+      <p class="mono-line">PORTLAND, OR · OPEN TO BAY AREA (RELOCATION-READY) OR REMOTE</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <p>© 2026 Frank Tinsley · <a href="terms.html">CarStream Terms</a> · <a href="privacy.html">CarStream Privacy</a></p>
+</footer>
+
 </body>
 </html>

@@ -1,25 +1,43 @@
-// v0.6 — dark studio · universal smooth blending incl. MATERIALS
+// common.wgsl — structs, SDF prims, foldSmooth material blending, lamp light
+// fields, environment, map(), march, and all material shading.
+// Ported from the banked v0.6 shader: every tuned material constant is
+// preserved verbatim. Changes for v1: prim POOL replaces the hardcoded scene,
+// lamps ride a uniform (CPU choreography), behind-glass march is capped
+// (DESIGN_SPEC §8 step 4b), tonemap/dither moved to the composite pass.
+//
 // Material codes: code = class*10 + param*9
 //   class 1 glass (param = frost 0..1) · 2 metal (param 0 chrome..1 gold)
 //   3 lamp · 4 matte ink · 5 pearl
 // A hit carries TWO material codes + a blend weight; neck pixels shade both and mix.
 
-struct U {
-  a : vec4f,  // res.x, res.y, time, dpr
-  b : vec4f,  // mouse.x, mouse.y (pixels, smoothed), mouseDown, hover
+// ---------- Globals (mirrors js/gfx/scene-format.js — edit both or neither) ----------
+// a: marchW, marchH, time, dt
+// b: cssW, cssH, scrollYSmoothed, pointerPresent
+// c: pointerScene.xy, primCount, idleEnergy
+// lamps[3]: xyz (scene units) + intensity
+struct Globals {
+  a : vec4f,
+  b : vec4f,
+  c : vec4f,
+  lamps : array<vec4f, 3>,
 };
-@group(0) @binding(0) var<uniform> u : U;
+@group(0) @binding(0) var<uniform> u : Globals;
 
-struct VSOut { @builtin(position) pos : vec4f };
+// ---------- Prim pool (mirrors js/gfx/scene-format.js — edit both or neither) ----------
+// posRadius: xyz + radius · params: halfExt.xyz + cornerR · contentRect: calm zone
+// meta: kind, flags, matClass, reserved · blend: k, swell, squish, matParam · aux: free
+struct Prim {
+  posRadius   : vec4f,
+  params      : vec4f,
+  contentRect : vec4f,
+  tag         : vec4u,
+  blend       : vec4f,
+  aux         : vec4f,
+};
+@group(0) @binding(1) var<storage, read> prims : array<Prim>;
 
-@vertex
-fn vs(@builtin(vertex_index) vi : u32) -> VSOut {
-  var out : VSOut;
-  let x = f32(i32(vi & 1u) * 4 - 1);
-  let y = f32(i32(vi >> 1u) * 4 - 1);
-  out.pos = vec4f(x, y, 0.0, 1.0);
-  return out;
-}
+const LAMP_COUNT : i32 = 3;
+const EMITTER_R : f32 = 0.17;
 
 // ---------- material codes ----------
 fn mkCode(cls : f32, prm : f32) -> f32 { return cls * 10.0 + clamp(prm, 0.0, 1.0) * 9.0; }
@@ -37,6 +55,7 @@ struct Hit {
 // ---------- sdf helpers ----------
 fn sdSphere(p : vec3f, r : f32) -> f32 { return length(p) - r; }
 
+// L4-norm squircle: continuous-curvature corners CSS border-radius can't make
 fn sdSquircleBox(p : vec3f, b : vec3f, r : f32) -> f32 {
   let q = abs(p) - b;
   let qc = max(q, vec3f(0.0));
@@ -67,54 +86,51 @@ fn foldSmooth(a : Hit, d : f32, code : f32, k : f32) -> Hit {
   return out;
 }
 
-// ---------- emitters (the "lamps") ----------
-fn emitterPos(i : i32, t : f32) -> vec3f {
-  if (i == 0) { return vec3f(sin(t * 0.21) * 1.8, cos(t * 0.16) * 1.0, -1.6); }
-  if (i == 1) { return vec3f(cos(t * 0.17 + 1.5) * 2.0, sin(t * 0.25) * 1.2, -2.0); }
-  return vec3f(sin(t * 0.12 + 3.9) * 1.4, cos(t * 0.21 + 1.0) * -1.1, -1.3);
-}
+// ---------- lamps (positions/intensity CPU-choreographed via Globals) ----------
+fn lampPos(i : i32) -> vec3f { return u.lamps[i].xyz; }
+fn lampGain(i : i32) -> f32 { return u.lamps[i].w; }
 fn emitterTint(i : i32) -> vec3f {
   if (i == 0) { return vec3f(1.0, 0.18, 0.65); }
   if (i == 1) { return vec3f(0.15, 0.75, 1.0); }
   return vec3f(1.0, 0.62, 0.18);
 }
-const EMITTER_R : f32 = 0.17;
+fn nearestLamp(p : vec3f) -> i32 {
+  var id = 0;
+  var best = 1e9;
+  for (var i = 0; i < LAMP_COUNT; i++) {
+    let d = length(p - lampPos(i));
+    if (d < best) { best = d; id = i; }
+  }
+  return id;
+}
 
 // ---------- scene ----------
 fn map(p : vec3f) -> Hit {
-  let t = u.a.z;
-  let res = u.a.xy;
-  let m = (u.b.xy / res * 2.0 - 1.0) * vec2f(res.x / res.y, -1.0);
-  let mw = vec3f(m * 1.4, 0.0);
-
-  let p1 = vec3f(sin(t * 0.31) * 0.85, cos(t * 0.23) * 0.5, sin(t * 0.17) * 0.3);
-  let p2 = vec3f(cos(t * 0.27) * 0.7, sin(t * 0.19) * -0.6, cos(t * 0.29) * 0.25);
-  let p3 = vec3f(sin(t * 0.13 + 2.0) * 0.5, sin(t * 0.37) * 0.65, sin(t * 0.11) * 0.35);
-  let chaseR = 0.30 + u.b.z * 0.06 + sin(t * 1.7) * 0.015;
-
   var h : Hit;
-  h.d = sdSphere(p - p1, 0.42);
-  h.mA = mkCode(1.0, 0.0);   // clear
+  h.d = 1e9;
+  h.mA = mkCode(1.0, 1.0);
   h.mB = h.mA;
   h.w = 0.0;
-  h = foldSmooth(h, sdSphere(p - mw, chaseR),  mkCode(1.0, 0.0), 0.42);  // clear chaser
-  h = foldSmooth(h, sdSphere(p - p2, 0.34),    mkCode(1.0, 1.0), 0.35);  // frosted
-  h = foldSmooth(h, sdSphere(p - p3, 0.28),    mkCode(1.0, 1.0), 0.35);  // frosted
-  h = foldSmooth(h, sdSquircleBox(p - vec3f(0.0, -0.05, -0.35), vec3f(1.08, 0.48, 0.005), 0.15),
-                 mkCode(1.0, 0.0), 0.28);                                 // clear panel
 
-  let cpos = vec3f(cos(t * 0.5) * 1.5, sin(t * 0.8) * 0.9, 0.45 + sin(t * 0.33) * 0.2);
-  h = foldSmooth(h, sdSphere(p - cpos, 0.12), mkCode(2.0, 0.0), 0.16);   // chrome
-  let gpos = vec3f(cos(t * 0.23 + 2.5) * 1.9, sin(t * 0.31 + 1.0) * 1.1, 0.3 + cos(t * 0.19) * 0.3);
-  h = foldSmooth(h, sdSphere(p - gpos, 0.16), mkCode(2.0, 1.0), 0.16);   // satin gold
-  let ipos = vec3f(sin(t * 0.15 + 4.5) * 1.7, -0.9 + sin(t * 0.22) * 0.3, 0.1);
-  h = foldSmooth(h, sdSphere(p - ipos, 0.22), mkCode(4.0, 0.0), 0.20);   // matte ink
-  let ppos = vec3f(sin(t * 0.4 + 1.0) * 1.2, 0.85 + cos(t * 0.27) * 0.25, 0.5);
-  h = foldSmooth(h, sdSphere(p - ppos, 0.09), mkCode(5.0, 0.0), 0.12);   // pearl
+  let count = u32(u.c.z);
+  for (var i = 0u; i < count; i++) {
+    let pr = prims[i];
+    let k = max(pr.blend.x, 1e-4);
+    let rel = p - pr.posRadius.xyz;
+    var bound : f32;
+    if (pr.tag.x == 1u) { bound = length(pr.params.xyz) + pr.params.w; }
+    else { bound = pr.posRadius.w; }
+    // exact skip: beyond a.d + k the fold is the identity
+    if (length(rel) - bound - k > h.d) { continue; }
+    var d : f32;
+    if (pr.tag.x == 1u) { d = sdSquircleBox(rel, pr.params.xyz, pr.params.w); }
+    else { d = sdSphere(rel, pr.posRadius.w); }
+    h = foldSmooth(h, d, mkCode(f32(pr.tag.z), pr.blend.w), k);
+  }
 
-  h = foldSmooth(h, sdSphere(p - emitterPos(0, t), EMITTER_R), mkCode(3.0, 0.0), 0.10);
-  h = foldSmooth(h, sdSphere(p - emitterPos(1, t), EMITTER_R), mkCode(3.0, 0.0), 0.10);
-  h = foldSmooth(h, sdSphere(p - emitterPos(2, t), EMITTER_R), mkCode(3.0, 0.0), 0.10);
+  for (var i = 0; i < LAMP_COUNT; i++) {
+    h = foldSmooth(h, sdSphere(p - lampPos(i), EMITTER_R), mkCode(3.0, 0.0), 0.10);
+  }
   return h;
 }
 
@@ -127,12 +143,11 @@ fn calcNormal(p : vec3f) -> vec3f {
     e.xxx * map(p + e.xxx).d);
 }
 
-// ---------- lamp light fields ----------
+// ---------- lamp light fields (closed-form line integrals — zero bloom passes) ----------
 fn glowRay(ro : vec3f, rd : vec3f, tmax : f32, spread : f32) -> vec3f {
-  let t = u.a.z;
   var col = vec3f(0.0);
-  for (var i = 0; i < 3; i++) {
-    let q = ro - emitterPos(i, t);
+  for (var i = 0; i < LAMP_COUNT; i++) {
+    let q = ro - lampPos(i);
     let b = dot(q, rd);
     let c = dot(q, q);
     let hh = max(c - b * b, 0.0) + 0.045 + spread;
@@ -141,44 +156,41 @@ fn glowRay(ro : vec3f, rd : vec3f, tmax : f32, spread : f32) -> vec3f {
     let u2 = tmax + b;
     let f1 = u1 / (2.0 * hh * (u1 * u1 + hh)) + atan(u1 * s) * s / (2.0 * hh);
     let f2 = u2 / (2.0 * hh * (u2 * u2 + hh)) + atan(u2 * s) * s / (2.0 * hh);
-    col += emitterTint(i) * 0.011 * max(f2 - f1, 0.0);
+    col += emitterTint(i) * lampGain(i) * 0.011 * max(f2 - f1, 0.0);
   }
   return col;
 }
 
 fn glowSpec(p : vec3f, n : vec3f, rd : vec3f, shininess : f32) -> vec3f {
-  let t = u.a.z;
   var col = vec3f(0.0);
-  for (var i = 0; i < 3; i++) {
-    let l = emitterPos(i, t) - p;
+  for (var i = 0; i < LAMP_COUNT; i++) {
+    let l = lampPos(i) - p;
     let d2 = dot(l, l);
     let ln = l * inverseSqrt(d2);
     let hv = normalize(ln - rd);
-    col += emitterTint(i) * pow(max(dot(n, hv), 0.0), shininess) / (1.0 + d2 * 0.3);
+    col += emitterTint(i) * lampGain(i) * pow(max(dot(n, hv), 0.0), shininess) / (1.0 + d2 * 0.3);
   }
   return col;
 }
 
 fn glowDiffuse(p : vec3f, n : vec3f) -> vec3f {
-  let t = u.a.z;
   var col = vec3f(0.0);
-  for (var i = 0; i < 3; i++) {
-    let l = emitterPos(i, t) - p;
+  for (var i = 0; i < LAMP_COUNT; i++) {
+    let l = lampPos(i) - p;
     let d2 = dot(l, l);
     let ndl = max(dot(n, l * inverseSqrt(d2)), 0.0);
-    col += emitterTint(i) * ndl / (1.0 + d2 * 0.6);
+    col += emitterTint(i) * lampGain(i) * ndl / (1.0 + d2 * 0.6);
   }
   return col;
 }
 
 fn glowBacklight(p : vec3f, rd : vec3f) -> vec3f {
-  let t = u.a.z;
   var col = vec3f(0.0);
-  for (var i = 0; i < 3; i++) {
-    let l = emitterPos(i, t) - p;
+  for (var i = 0; i < LAMP_COUNT; i++) {
+    let l = lampPos(i) - p;
     let d2 = dot(l, l);
     let through = max(dot(rd, l * inverseSqrt(d2)), 0.0);
-    col += emitterTint(i) * pow(through, 3.5) / (0.35 + d2 * 0.8);
+    col += emitterTint(i) * lampGain(i) * pow(through, 3.5) / (0.35 + d2 * 0.8);
   }
   return col;
 }
@@ -220,6 +232,24 @@ fn march(ro : vec3f, rd : vec3f) -> vec4f {   // (t, mA, mB, w); mA<0 = miss
   return vec4f(t, h.mA, h.mB, h.w);
 }
 
+// capped behind-glass march (DESIGN_SPEC §8 step 4b): behind a reading panel a
+// full-budget miss across the biggest panel on screen is the single worst
+// pixel cost — cap steps and distance.
+fn march2(ro : vec3f, rd : vec3f) -> vec4f {
+  var t = 0.0;
+  var h : Hit;
+  var hitOk = -1.0;
+  for (var i = 0; i < 32; i++) {
+    let p = ro + rd * t;
+    h = map(p);
+    if (h.d < 0.0012 * t + 0.0006) { hitOk = 1.0; break; }
+    t += h.d * 0.9;
+    if (t > 4.0) { break; }
+  }
+  if (hitOk < 0.0 || t > 4.0) { return vec4f(t, -1.0, -1.0, 0.0); }
+  return vec4f(t, h.mA, h.mB, h.w);
+}
+
 fn ambOcc(p : vec3f, n : vec3f) -> f32 {
   var occ = 0.0;
   var w = 0.6;
@@ -243,7 +273,7 @@ fn thickness(p : vec3f, refr : vec3f, jit : f32) -> f32 {
   }
   var a = tIn;
   var b = tt;
-  for (var i = 0; i < 7; i++) {
+  for (var i = 0; i < 7; i++) {   // 7-step bisection: exit lands on the surface
     let m = 0.5 * (a + b);
     if (map(p + refr * m).d < 0.0) { a = m; } else { b = m; }
   }
@@ -256,14 +286,7 @@ fn shadeSimple(p : vec3f, n : vec3f, rd : vec3f, code : f32) -> vec3f {
   let prm = codeParam(code);
   let cosT = clamp(dot(-rd, n), 0.0, 1.0);
   if (cls == 3.0) {
-    var id = 0;
-    var best = 1e9;
-    let t = u.a.z;
-    for (var i = 0; i < 3; i++) {
-      let d = length(p - emitterPos(i, t));
-      if (d < best) { best = d; id = i; }
-    }
-    return emitterTint(id) * 4.0;
+    return emitterTint(nearestLamp(p)) * 4.0;
   } else if (cls == 2.0) {
     let f0tint = mix(vec3f(0.95, 0.96, 0.97), vec3f(1.0, 0.72, 0.32), prm);
     return f0tint * (env(reflect(rd, n)) * 1.2 + glowSpec(p, n, rd, 100.0));
@@ -302,7 +325,11 @@ fn shadeMaterial(p : vec3f, n : vec3f, rd : vec3f, code : f32, jit : f32) -> vec
     let exitP = p + refr * thick;
 
     var clearCol = vec3f(0.0);
-    if (frost < 0.95) {
+    // march-skip threshold: past it the glass is a pure diffuser. 0.94, a
+    // margin BELOW the 0.95 rest frost: the f32 mkCode/codeParam roundtrip
+    // reproduces 0.95 as 0.94999993, so a guard AT 0.95 would never fire —
+    // the skip must actually skip, not just visually fade.
+    if (frost < 0.94) {
       let nExit = calcNormal(exitP);
       let rr = reflect(refr, nExit);
       let tirCol = glowRay(exitP, rr, 8.0, 0.1) * 2.0 + env(rr) * 0.3;
@@ -311,11 +338,12 @@ fn shadeMaterial(p : vec3f, n : vec3f, rd : vec3f, code : f32, jit : f32) -> vec
       if (k > 0.0) {
         let refr2 = normalize(refract(refr, -nExit, 1.45));
         let ro2 = exitP + nExit * 0.02 + refr2 * 0.01;
-        let h2 = march(ro2, refr2);
-        var marched = vec3f(0.0);
+        let h2 = march2(ro2, refr2);
+        var marched = glowRay(ro2, refr2, 4.0, 0.0) * 2.5;   // void behind: still the lamps' halos
         if (h2.y > 0.0) {
           let p2 = ro2 + refr2 * h2.x;
-          marched = shadeSimple(p2, calcNormal(p2), refr2, h2.y);
+          marched = shadeSimple(p2, calcNormal(p2), refr2, h2.y)
+                  + glowRay(ro2, refr2, h2.x, 0.0) * 2.5;
         }
         clearCol = mix(tirCol, marched, smoothstep(0.0, 0.12, k));
       } else {
@@ -331,8 +359,11 @@ fn shadeMaterial(p : vec3f, n : vec3f, rd : vec3f, code : f32, jit : f32) -> vec
     let milk = (vec3f(0.055, 0.06, 0.075) * ao + glowDiffuse(p, n) * 0.16) * frost;
 
     col = mix(refrCol, reflCol, clamp(fres * mix(1.5, 0.9, frost), 0.0, 1.0)) + milk + backlight;
+    // rim; the glint tracks the pointer (masthead liveness proof)
+    let pd = p.xy - u.c.xy;
+    let glint = exp(-dot(pd, pd) * 6.0) * u.b.w;
     let rimW = pow(1.0 - cosT, 4.0);
-    col += mix(vec3f(1.0) * 0.06, film(cosT) * 0.055, frost) * rimW;
+    col += mix(vec3f(1.0) * 0.06, film(cosT) * 0.055, frost) * rimW * (1.0 + glint * 1.5);
     col *= mix(mix(0.85, 0.8, frost), 1.0, ao);
 
   } else if (cls == 2.0) {
@@ -351,14 +382,7 @@ fn shadeMaterial(p : vec3f, n : vec3f, rd : vec3f, code : f32, jit : f32) -> vec
 
   } else if (cls == 3.0) {
     // ---- LAMP as HDR emissive (blend-zone path; pure lamps early-return in fs) ----
-    var id = 0;
-    var best = 1e9;
-    let t = u.a.z;
-    for (var i = 0; i < 3; i++) {
-      let d = length(p - emitterPos(i, t));
-      if (d < best) { best = d; id = i; }
-    }
-    col = emitterTint(id) * 6.0 * (1.0 - 0.12 * pow(1.0 - cosT, 3.0));
+    col = emitterTint(nearestLamp(p)) * 6.0 * (1.0 - 0.12 * pow(1.0 - cosT, 3.0));
 
   } else if (cls == 4.0) {
     // ---- MATTE INK ----
@@ -379,48 +403,4 @@ fn shadeMaterial(p : vec3f, n : vec3f, rd : vec3f, code : f32, jit : f32) -> vec
     col *= mix(0.8, 1.0, ao);
   }
   return col;
-}
-
-@fragment
-fn fs(in : VSOut) -> @location(0) vec4f {
-  let res = u.a.xy;
-  let frag = in.pos.xy;
-  let uv = (frag / res * 2.0 - 1.0) * vec2f(res.x / res.y, -1.0);
-
-  let ro = vec3f(0.0, 0.0, 3.4);
-  let rd = normalize(vec3f(uv * 0.62, -1.0));
-
-  // background: solid black — only objects and light exist
-  var col = vec3f(0.0);
-
-  let hit = march(ro, rd);
-  if (hit.y > 0.0) {
-    let p = ro + rd * hit.x;
-    let n = calcNormal(p);
-    let jit = ign(frag, u.a.z);
-
-    // pure lamp: display-referred, fully saturated, bypasses tonemap
-    if (codeClass(hit.y) == 3.0 && hit.w < 0.02) {
-      let cosT = clamp(dot(-rd, n), 0.0, 1.0);
-      var id = 0;
-      var best = 1e9;
-      let t = u.a.z;
-      for (var i = 0; i < 3; i++) {
-        let d = length(p - emitterPos(i, t));
-        if (d < best) { best = d; id = i; }
-      }
-      return vec4f(emitterTint(id) * (1.0 - 0.12 * pow(1.0 - cosT, 3.0)), 1.0);
-    }
-
-    col = shadeMaterial(p, n, rd, hit.y, jit);
-    if (hit.w > 0.02) {
-      // blend neck: shade the other material too and cross-fade
-      let colB = shadeMaterial(p, n, rd, hit.z, jit);
-      col = mix(col, colB, hit.w);
-    }
-  }
-
-  col = col / (col + vec3f(0.85));
-  col = pow(col, vec3f(1.0 / 2.2));
-  return vec4f(col, 1.0);
 }
