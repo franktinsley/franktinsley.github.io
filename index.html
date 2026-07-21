@@ -3,195 +3,614 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0f">
-<title>Frank Tinsley — Real-Time Graphics Engineer</title>
-<meta name="description" content="Real-time graphics engineer. This page is rendered live by my own SDF ray marcher in WebGPU.">
-<meta property="og:title" content="Frank Tinsley — Real-Time Graphics Engineer">
-<meta property="og:description" content="Real-time graphics engineer. This page is rendered live by my own SDF ray marcher in WebGPU.">
-<link rel="stylesheet" href="css/site.css?v=c4993e4-181612">
-<script type="module" src="js/main.js?v=c4993e4-181612"></script>
+<title>Frank Tinsley — real-time, end to end</title>
+<meta name="description" content="Technical artist & real-time engineer. 15+ years across shaders, tools, and XR. This page is a live SDF renderer.">
+<style>
+  :root{
+    color-scheme: dark;
+    --ink:#e6eef5; --dim:#5f7b88; --cy:#45d6df; --cy-soft:rgba(69,214,223,0.5);
+    /* --dim is for bezel chrome sitting on the near-black surround. The same
+       tone used for copy ON the glass measures ~2:1 against the lit dot field,
+       so recessive metadata that rides the instrument gets its own step up. */
+    --dim-on:#8ba3b0;
+    --line:rgba(120,200,215,0.10); --bg:#06080c;
+    --mono: ui-monospace,"SF Mono","SFMono-Regular",Menlo,monospace;
+    --sans: system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); overflow-x:hidden; }
+  /* the ONLY thing that scrolls — an invisible spacer that generates progress.
+     everything visible is pinned and morphs in place. */
+  #scroll{ height:560vh; }
+  #gl{ position:fixed; inset:0; width:100vw; height:100vh; display:block; z-index:0; }
+
+  .frame{ position:fixed; inset:24px; border:1px solid var(--line); border-radius:2px; pointer-events:none; z-index:2; }
+  .tick{ position:fixed; width:15px; height:15px; pointer-events:none; z-index:2; }
+  .tick.tl{ top:24px; left:24px; border-top:1px solid var(--cy-soft); border-left:1px solid var(--cy-soft); }
+  .tick.tr{ top:24px; right:24px; border-top:1px solid var(--cy-soft); border-right:1px solid var(--cy-soft); }
+  .tick.bl{ bottom:24px; left:24px; border-bottom:1px solid var(--cy-soft); border-left:1px solid var(--cy-soft); }
+  .tick.br{ bottom:24px; right:24px; border-bottom:1px solid var(--cy-soft); border-right:1px solid var(--cy-soft); }
+  .nameplate{ position:fixed; top:40px; left:44px; z-index:3; pointer-events:none;
+    font:500 10.5px/1 var(--mono); letter-spacing:0.22em; color:var(--dim); text-transform:uppercase;
+    display:flex; align-items:center; gap:8px; }
+  .nameplate .led{ width:5px;height:5px;border-radius:50%;background:var(--cy);box-shadow:0 0 7px var(--cy);animation:beat 3.4s ease-in-out infinite; }
+  @keyframes beat{0%,100%{opacity:.35}50%{opacity:1}}
+  .readout{ position:fixed; left:44px; right:44px; bottom:38px; z-index:3; pointer-events:none;
+    display:flex; gap:24px; flex-wrap:wrap; align-items:baseline;
+    font:400 11px/1 var(--mono); letter-spacing:0.06em; color:var(--ink); }
+  .readout .k{ color:var(--dim); letter-spacing:0.16em; font-weight:500; }
+  .readout .v{ font-variant-numeric:tabular-nums; } .readout .v.acc{ color:var(--cy); }
+  .readout .spacer{ flex:1 1 auto; } .readout .err{ color:#ff7a7a; }
+
+  /* pinned content layer — one state visible at a time, driven by scroll */
+  .stage{ position:fixed; inset:0; z-index:1; display:grid; place-items:center; pointer-events:none; }
+  .state{ grid-area:1/1; width:min(760px,86vw); text-align:center; opacity:0; will-change:opacity,transform; }
+  .state.on{ pointer-events:auto; }
+  .state::before{ content:""; position:absolute; inset:-14% -10% -18%; z-index:-1; pointer-events:none;
+    /* a wash under the copy only — the glass keeps its own density (see the shader's
+       interior compression); this just stops the lit dot field reaching the type.
+       Reaches wider than the text block so runs at the far ends of a wide row (the
+       year labels) get the same coverage as ones near the middle. */
+    background:radial-gradient(68% 64% at 50% 48%, rgba(6,8,12,0.60), rgba(6,8,12,0.30) 58%, transparent 84%); }
+  .eyebrow{ font:500 11px/1 var(--mono); letter-spacing:0.34em; text-transform:uppercase; color:var(--cy); opacity:.85; margin:0 0 18px; }
+  /* in the SEPARATED states the eyebrow gets its own glass label plate, so it
+     needs clearance from the panels/rows below or the two forms neck together */
+  .state[data-state="2"] .eyebrow, .state[data-state="3"] .eyebrow{ margin-bottom:38px; }
+  h1{ margin:0; font-weight:600; font-size:clamp(30px,5.2vw,58px); line-height:1.03; letter-spacing:-0.025em; text-shadow:0 2px 40px rgba(0,0,0,.55); }
+  .sub{ margin:18px 0 0; font:400 12px/1.5 var(--mono); letter-spacing:0.14em; text-transform:uppercase; color:var(--dim-on); }
+  .lede{ margin:16px auto 0; max-width:52ch; font-size:17px; line-height:1.5; color:#c7d4de; }
+  .lede strong{ color:var(--ink); font-weight:600; }
+  .grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:52px; margin-top:10px; text-align:left; }
+  .grid .cell h3{ margin:0 0 6px; font-size:15px; font-weight:600; }
+  .grid .cell p{ margin:0; font-size:12.5px; line-height:1.5; color:#9fb1bf; }
+  .grid .cell a, .links a, .lede a{ color:var(--cy); text-decoration:none; border-bottom:1px solid var(--cy-soft); }
+  .rows{ margin-top:8px; text-align:left; display:flex; flex-direction:column; gap:34px; }
+  .rows .row{ display:flex; gap:14px; align-items:baseline; font-size:13px; }
+  .rows .row .co{ color:var(--ink); font-weight:600; min-width:104px; }
+  .rows .row .desc{ color:#9fb1bf; line-height:1.45; }
+  .rows .row .yr{ color:var(--dim-on); font:400 11px/1 var(--mono); margin-left:auto; white-space:nowrap; }
+  .links{ margin-top:18px; display:flex; gap:20px; justify-content:center; flex-wrap:wrap; font:400 13px/1 var(--mono); letter-spacing:0.04em; }
+  .place{ margin-top:14px; font:400 11px/1 var(--mono); letter-spacing:0.12em; text-transform:uppercase; color:var(--dim-on); }
+  .hint{ position:fixed; left:50%; bottom:70px; transform:translateX(-50%); z-index:3; pointer-events:none;
+    font:500 10px/1 var(--mono); letter-spacing:0.24em; text-transform:uppercase; color:var(--dim); opacity:.8;
+    transition:opacity .4s; }
+  /* In an inspection view, get the DOM layers out of the way. The legibility scrim
+     and the hero's text-shadow both sit BETWEEN the canvas and the eye, so they
+     darken the debug output and read as shading artefacts that aren't there —
+     a soft halo around the copy that looks exactly like a discontinuity. Text
+     itself stays, so you can still tell where you are. */
+  body.dbg .state::before{ background:none !important; }
+  body.dbg h1{ text-shadow:none !important; }
+  /* ---- portrait / phone: single-column, compact, fit each state in the viewport ---- */
+  @media (max-width: 680px){
+    .frame{ inset:12px; }
+    .tick{ width:11px; height:11px; }
+    .tick.tl{ top:12px; left:12px; } .tick.tr{ top:12px; right:12px; }
+    .tick.bl{ bottom:12px; left:12px; } .tick.br{ bottom:12px; right:12px; }
+    .nameplate{ top:22px; left:22px; font-size:9px; letter-spacing:0.14em; gap:6px; }
+    .readout{ left:22px; right:22px; bottom:20px; gap:6px 14px; font-size:9px; letter-spacing:0.03em; }
+    .readout .opt{ display:none; } .readout .spacer{ display:none; }
+    .state{ width:78vw; }
+    .state::before{ inset:-10% -8% -14%; }
+    .eyebrow{ font-size:9.5px; letter-spacing:0.18em; margin:0 0 12px; }
+    .state[data-state="2"] .eyebrow, .state[data-state="3"] .eyebrow{ margin-bottom:26px; }
+    h1{ font-size:clamp(23px,7.4vw,34px); line-height:1.07; }
+    .lede{ font-size:14px; line-height:1.45; max-width:none; margin-top:12px; }
+    .sub{ font-size:9.5px; letter-spacing:0.05em; margin-top:12px; }
+    .grid{ grid-template-columns:1fr; gap:26px; }
+    .grid .cell h3{ font-size:14.5px; margin-bottom:4px; }
+    .grid .cell p{ font-size:12px; line-height:1.42; }
+    .rows{ gap:18px; }
+    .rows .row{ flex-wrap:wrap; font-size:12px; line-height:1.35; gap:2px 8px; }
+    .rows .row .co{ min-width:0; flex:0 0 auto; }
+    .rows .row .yr{ margin-left:auto; }
+    .rows .row .desc{ flex:0 0 100%; color:#93a6b4; }
+    .links{ gap:10px 16px; font-size:12.5px; }
+    .place{ font-size:9.5px; }
+  }
+  @media (prefers-reduced-motion: reduce){ #scroll{height:auto} }
+</style>
 </head>
 <body>
-<a class="skip" href="#main">Skip to content</a>
+<div id="scroll"></div>
+<canvas id="gl"></canvas>
+<div class="frame"></div>
+<div class="tick tl"></div><div class="tick tr"></div><div class="tick bl"></div><div class="tick br"></div>
+<div class="nameplate"><span class="led"></span>Frank Tinsley · Optical bench</div>
 
-<canvas id="gfx" aria-hidden="true"></canvas>
-
-<header class="chrome">
-  <div class="chrome-left">
-    <a class="wordmark" href="#top">FRANK TINSLEY</a>
-    <span class="chrome-tag">REAL-TIME GRAPHICS</span>
-  </div>
-  <nav class="chrome-links" aria-label="Quick links">
-    <a href="mailto:franktinsley@me.com">email</a>
-    <a class="wide-only" href="assets/resume.pdf">resume (pdf)</a>
-    <a class="wide-only" href="https://linkedin.com/in/franktinsley">linkedin</a>
-  </nav>
-</header>
-
-<nav class="spine" aria-label="Sections">
-  <a href="#top"><span class="vh">Top</span></a>
-  <a href="#work"><span class="vh">Selected work</span></a>
-  <a href="#career"><span class="vh">Career</span></a>
-  <a href="#colophon"><span class="vh">Colophon</span></a>
-  <a href="#contact"><span class="vh">Contact</span></a>
-</nav>
-
-<main id="main">
-
-  <!-- ======================= 00 · MASTHEAD ======================= -->
-  <section id="top" class="masthead">
-    <div class="panel" data-sdf="masthead">
-      <h1>Frank Tinsley</h1>
-      <p class="lede"><strong>Real-time graphics engineer.</strong> Shaders, engines, and the occasional FPGA.</p>
-      <p class="pitch">
-        <span class="tier-copy tier-copy-live">This page is drawn by my own renderer. Every panel behind
-        this text is a signed-distance field, ray-marched live in a WebGPU fragment shader — parametric
-        glass and lamplight; no textures, no bloom pass. The text is HTML. Everything else is the work
-        sample.</span>
-        <span class="tier-copy tier-copy-static">This page is normally drawn live by my own renderer —
-        every panel behind this text is a signed-distance field, ray-marched in a WebGPU fragment
-        shader. Your browser isn't running it right now, so you're seeing the flat version. The text is
-        HTML either way.</span>
-      </p>
-      <div class="cta-row">
-        <a class="pill pill-primary" href="mailto:franktinsley@me.com">Email — franktinsley@me.com</a>
-        <a class="pill" href="https://linkedin.com/in/franktinsley">LinkedIn</a>
-        <a class="pill" href="assets/resume.pdf">Resume (PDF)</a>
-      </div>
-      <nav class="anchor-row" aria-label="Sections (inline)">
-        <a href="#work">WORK</a> · <a href="#career">CAREER</a> ·
-        <a href="#colophon">COLOPHON</a> · <a href="#contact">CONTACT</a>
-      </nav>
-      <dl class="spec-strip">
-        <dt>RENDERER</dt><dd>SDF ray march · WebGPU / WGSL · 1 march pass + 1 composite (scale · tonemap · dither)</dd>
-        <dt>LIGHT</dt><dd>3 emissive lamps · closed-form glow integral · 0 bloom passes</dd>
-        <dt>GLASS</dt><dd>&le;1 refracted bounce per pixel · Beer–Lambert absorption</dd>
-        <dt>BUDGET</dt><dd>60 fps target on Apple Silicon · adaptive elsewhere · idles to 0 GPU</dd>
-      </dl>
-      <p class="readout" data-readout>render&nbsp;&nbsp;&nbsp;STATIC — the live renderer needs JavaScript + WebGPU · text is HTML either way</p>
-      <p class="mono-line">PORTLAND, OR · RELOCATION-READY (BAY AREA) · REMOTE</p>
-    </div>
-    <div class="scroll-cue" aria-hidden="true">&#9662;</div>
+<div class="stage">
+  <!-- 0 Identity -->
+  <section class="state" data-state="0">
+    <p class="eyebrow">Real-time, end to end</p>
+    <h1>Half artist, half engineer.<br>All real-time.</h1>
+    <p class="sub">Technical artist &amp; real-time engineer · 15+ years · shaders · tools · XR</p>
   </section>
-
-  <!-- ======================= 01 · SELECTED WORK ======================= -->
-  <section id="work">
-    <h2 class="eyebrow">01 — SELECTED WORK</h2>
-    <div class="panel" data-sdf="work">
-      <article>
-        <h3>SDF modeling engine</h3>
-        <p class="mono-line">SWIFT + METAL · ~50,000 LINES · ~650 COMMITS · iOS / iPadOS / macOS · 2026</p>
-        <p>A real-time signed-distance-field modeling engine and app, built solo in about four months:
-        ray-marched implicit surfaces, smooth booleans and organic blends, procedural geometry, and
-        marching-cubes export to STL/OBJ. I wrote the full Metal stack — compute, fragment, and vertex —
-        and tuned it to hold interactive frame rates on phone GPUs, not just desktops. The renderer
-        behind this page is its little sibling. The engine is unreleased; code and a live demo are
-        available on request.</p>
-      </article>
-      <hr class="hairline">
-      <article>
-        <h3>Konami System 573, reimplemented on an FPGA</h3>
-        <p class="mono-line">~22,000 LINES CUSTOM RTL · ~1 MONTH · MiSTer / DE10-NANO · VERIFIED FRAME-ACCURATE VS MAME ON HARDWARE</p>
-        <p>A re-implementation of Konami's System 573 — the PlayStation-derived arcade board behind
-        Dance Dance Revolution — as a MiSTer FPGA core. Roughly 22,000 lines of custom RTL in about a
-        month, through an AI-accelerated workflow built around automated verification: changes proven
-        frame-accurate against the MAME reference emulator by frame-diff tooling running against the
-        real FPGA. Digital design is a different discipline from shading; the transferable part was
-        making the verification loop fast enough to iterate like software.</p>
-        <p class="mono-line">SOURCE — AVAILABLE ON REQUEST</p>
-      </article>
+  <!-- 1 Method -->
+  <section class="state" data-state="1">
+    <p class="eyebrow">The method</p>
+    <h1>I make real-time<br>ideas real.</h1>
+    <p class="lede">This page is one of them — everything behind this text is a signed-distance field,
+      solved per pixel in a single WebGL2 shader, full resolution every frame. Prototype broad and fast,
+      bank the win, then harden. <strong>AI didn't change how I work; it widened the blast radius</strong> —
+      and I still prove every result with a number.</p>
+  </section>
+  <!-- 2 Work -->
+  <section class="state" data-state="2">
+    <p class="eyebrow">Recent work · three stacks, one method</p>
+    <div class="grid">
+      <div class="cell"><h3>SDF modeling engine</h3><p>Production-grade signed-distance-field ray-marching
+        3D modeling engine in Swift + Metal — full shader stack, procedural geometry, marching-cubes export.
+        Real-time on iOS, iPadOS, macOS. ~50k lines, solo. <a href="#">demo on request</a></p></div>
+      <div class="cell"><h3>System 573 — FPGA</h3><p>FPGA re-implementation of Konami's PSX-based arcade
+        platform for MiSTer — ~22k lines of RTL in a month, proven frame-accurate against MAME on real
+        hardware. <a href="https://github.com/fabricore-eng/System573_MiSTer">github ↗</a></p></div>
+      <div class="cell"><h3>This renderer</h3><p>The SDF instrument you're looking at — one WebGL2 fragment
+        shader that morphs, refracts, and reacts to the cursor, at 120fps and full resolution.</p></div>
     </div>
   </section>
-
-  <!-- ======================= 02 · CAREER ======================= -->
-  <section id="career">
-    <h2 class="eyebrow">02 — CAREER</h2>
-    <div class="panel" data-sdf="career">
-      <p>Fifteen years on the art–engineering boundary: prototype fast, then harden for frame rate.</p>
-      <dl class="timeline">
-        <dt>2025–26</dt>
-        <dd><strong>Meta</strong> (contract) — Technical Artist on <strong>Meta Avatars</strong>:
-        real-time interactivity and avatar rendering; built a visual in-editor tool for authoring mock
-        events and driving them at runtime to test the live-avatar systems.</dd>
-        <dt>2022–23</dt>
-        <dd><strong>Meta</strong> (contract) — AR subject-matter expert on Spark AR Studio; built
-        hands-on curriculum training the next generation of AR creators.</dd>
-        <dt>2021–22</dt>
-        <dd><strong>Microsoft</strong> — Mixed reality developer.</dd>
-        <dt>2018–20</dt>
-        <dd><strong>Camera IQ</strong> — Runtime engineer across Unity/C#, JavaScript, and Go; created
-        <strong>ARX</strong>, an API-neutral interchange format for AR experiences spanning Lens Studio
-        and Spark AR.</dd>
-        <dt>2009–18</dt>
-        <dd><strong>CodeStep</strong> (independent) — A decade of Unity: interactive 3D installations
-        for a major athletic-shoe brand exhibited worldwide, retail photo-booth software, and games —
-        one acquired by GSN.</dd>
-      </dl>
-      <p><a class="pill" href="assets/resume.pdf">Resume (PDF)</a></p>
+  <!-- 3 Experience -->
+  <section class="state" data-state="3">
+    <p class="eyebrow">The depth behind it · 15+ years</p>
+    <div class="rows">
+      <div class="row"><span class="co">Meta</span><span class="desc">Technical Artist on Meta Avatars — real-time interactivity &amp; rendering; built an in-editor tool to drive and test the live-avatar systems.</span><span class="yr">2025–26</span></div>
+      <div class="row"><span class="co">Meta</span><span class="desc">AR subject-matter expert for Spark AR; built curriculum for the next generation of AR creators.</span><span class="yr">2022–23</span></div>
+      <div class="row"><span class="co">Microsoft</span><span class="desc">Mixed Reality developer.</span><span class="yr">2021–22</span></div>
+      <div class="row"><span class="co">Camera IQ</span><span class="desc">Built the platform's AR runtimes (C#, JS, Go) and created ARX, an API-neutral AR interchange format.</span><span class="yr">2018–20</span></div>
+      <div class="row"><span class="co">CodeStep</span><span class="desc">Nine years of interactive Unity work — mobile, XR, and branded retail installations shown worldwide.</span><span class="yr">2009–18</span></div>
     </div>
   </section>
-
-  <!-- ======================= 03 · COLOPHON ======================= -->
-  <section id="colophon">
-    <h2 class="eyebrow">03 — COLOPHON: HOW THIS PAGE IS DRAWN</h2>
-    <div class="panel" data-sdf="colophon">
-      <p>The background isn't a video or a texture. It's a scene — and this panel you're reading it on
-      is one of its objects.</p>
-      <ul class="colophon-list">
-        <li><strong>One scene, two passes.</strong> Everything behind the text — panels and lamps — is a
-        single ray-marched signed-distance scene, evaluated in one WebGPU fragment pass. A second small
-        pass scales it to your screen, tonemaps, and dithers. That's the entire pipeline: no textures,
-        no bloom, no post-effect chain.</li>
-        <li><strong>Parametric materials.</strong> Clear and frosted glass are one shading path with a
-        continuously blended frost parameter; chrome and gold share one metal path. The blend weight
-        rides the same smooth-minimum that merges the geometry, so materials transition across blend
-        necks without seams.</li>
-        <li><strong>Honest refraction.</strong> Clear glass earns one refracted bounce per pixel: a
-        march through its own interior, bisection-refined so the exit lands on the surface, then a
-        single capped march out to whatever actually sits behind — total internal reflection included.
-        Reflection rays never re-march; they sample an analytic environment. That's the performance
-        contract, stated exactly.</li>
-        <li><strong>The periphery is the cheap surface.</strong> Past the frost threshold, the
-        refracted bounce switches itself off and the glass becomes a pure diffuser. Every panel you're
-        not reading rests past that threshold, so the expensive clear-glass path only ever runs on the
-        one panel in focus — the depth-of-field hierarchy and the performance optimization are the
-        same rule.</li>
-        <li><strong>Analytic lamplight.</strong> The halo around each lamp is a closed-form line
-        integral evaluated along the ray — true volumetric falloff with zero bloom passes. Frosted glass
-        reuses the same integral with a widened spread: the frost <em>is</em> the diffuser.</li>
-        <li><strong>HTML first.</strong> Every word on this page is plain HTML; the canvas sits behind
-        it and never draws a letter. The DOM owns layout — the glass is re-fitted to the text's real
-        geometry, so zoom, font scaling, find-in-page, and screen readers just work.</li>
-        <li><strong>A disciplined budget.</strong> 60 fps target on Apple Silicon, adaptive resolution
-        elsewhere — the readout below is measured live, not asserted, and it only prints numbers the
-        page can actually measure. When you stop scrolling, rendering stops entirely; the readout says
-        so.</li>
-      </ul>
-      <p class="readout" data-readout>render&nbsp;&nbsp;&nbsp;STATIC — the live renderer needs JavaScript + WebGPU · text is HTML either way</p>
-      <p>View source — ES modules, no bundler, static files on GitHub Pages. The second demo.</p>
+  <!-- 4 Contact -->
+  <section class="state" data-state="4">
+    <p class="eyebrow">Let's build something</p>
+    <h1>Real-time ideas,<br>made real.</h1>
+    <div class="links">
+      <a href="mailto:franktinsley@me.com">franktinsley@me.com</a>
+      <a href="https://linkedin.com/in/franktinsley">LinkedIn</a>
+      <a href="assets/resume.pdf">Résumé</a>
+      <a href="https://github.com/fabricore-eng/System573_MiSTer">GitHub</a>
     </div>
+    <p class="place">Portland, OR — open to the Bay Area or remote</p>
   </section>
+</div>
 
-  <!-- ======================= 04 · CONTACT ======================= -->
-  <section id="contact">
-    <h2 class="eyebrow">04 — CONTACT</h2>
-    <div class="panel" data-sdf="contact">
-      <p>If you're building a renderer, an engine team, or anything that has to hit frame rate on real
-      hardware — email is the fastest way to reach me.</p>
-      <p><a class="pill pill-lens" id="email-lens" href="mailto:franktinsley@me.com">franktinsley@me.com</a></p>
-      <div class="cta-row">
-        <a class="pill" href="https://linkedin.com/in/franktinsley">LinkedIn</a>
-        <a class="pill" href="assets/resume.pdf">Resume (PDF)</a>
-      </div>
-      <p class="mono-line">PORTLAND, OR · OPEN TO BAY AREA (RELOCATION-READY) OR REMOTE</p>
-    </div>
-  </section>
+<div class="hint" id="hint">scroll ↓</div>
+<div class="readout" id="readout">
+  <div class="cell"><span class="k">RES</span> <span class="v" id="r_res">—</span></div>
+  <div class="cell"><span class="k">FPS</span> <span class="v acc" id="r_fps">—</span></div>
+  <div class="cell"><span class="k">STATE</span> <span class="v" id="r_state">01 / 05</span></div>
+  <div class="cell"><span class="k">VIEW</span> <span class="v acc" id="r_dbg">render</span> <span class="k">(n)</span></div>
+  <span class="spacer"></span>
+  <div class="cell opt"><span class="k">SDF</span> <span class="v">6-cell · smin</span></div>
+  <div class="cell opt"><span class="k">CUR</span> <span class="v" id="r_cur">x +0.00 y +0.00</span></div>
+</div>
 
-</main>
+<script type="x-shader/x-fragment" id="frag">#version 300 es
+precision highp float;
+uniform vec2  uRes;
+uniform vec2  uMouse;
+uniform vec2  uMouseS;
+uniform float uTime;
+uniform vec4  uCells[6];   // xy = center, zw = half-size (y-normalized units)
+uniform float uCorner;
+uniform float uK;          // smin blend radius
+uniform vec2  uPar;        // glass parallax offset — the DOM text gets the same
+uniform vec2  uSwell;      // reactive-glow focal point (floats on idle)
+uniform vec3  uLight;      // key-light direction
+uniform float uDbg;        // dev: 1 = show shading normal, 2 = show profile terms
+out vec4 frag;
 
-<footer class="site-footer">
-  <p>© 2026 Frank Tinsley · <a href="terms.html">CarStream Terms</a> · <a href="privacy.html">CarStream Privacy</a></p>
-</footer>
+// squircle rounded box: the corner uses a 4-norm instead of length() (2-norm),
+// so it's a superellipse arc with CONTINUOUS curvature into the straight edges
+// (a real squircle) rather than a circular arc that kinks where it meets the side.
+float sdRoundBox(vec2 p, vec2 b, float r){
+  vec2 q = abs(p) - b + r;
+  vec2 m = max(q, 0.0);
+  vec2 m2 = m*m;
+  float outside = sqrt(sqrt(m2.x*m2.x + m2.y*m2.y));   // (mx^4 + my^4)^(1/4)
+  // INSIDE, the textbook min() of the two axis depths creases along the 45° mitre
+  // where the nearest edge changes from the side to the top — a picture-frame
+  // joint. On a big form that mitre sits deep in the flat interior and never
+  // shows; a THIN form is almost entirely mitre, which is what made the timeline
+  // rows and the label plate read as creased rather than round.
+  // So take a SOFT min: a negative 2-norm, mirroring the superellipse used on the
+  // outside. It equals min() wherever one edge is clearly nearer, rounds off where
+  // they meet, and — unlike an additive smooth-min — still reaches exactly 0 at
+  // the edge, so it neither needs a clamp nor moves the silhouette. The rounding
+  // is a fixed FRACTION of the depth, so it scales itself to any form size.
+  vec2 din = max(-q, 0.0);                    // depth in from each axis' near edge
+  float s = din.x + din.y;                    // harmonic: the roundest of the family
+  float inner = s > 0.0 ? din.x*din.y/s : 0.0;
+  return -inner + outside - r;
+}
+float smin(float a, float b, float k){
+  float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
+  return mix(b, a, h) - k*h*(1.0-h);
+}
+float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
 
+// the morphing glass: union (smin) of 6 rounded cells — merged = a lens,
+// spread = panels/rows/node. One SDF, parameters do the shape-shifting.
+// corner radius is clamped to <= 0.5*min(half-size) PER CELL so it is always
+// a valid, continuously-round squircle — even as cells shrink mid-morph (an
+// unclamped radius > half-size breaks sdRoundBox = the "pinched corner" look).
+float cellD(int i, vec2 p){
+  vec2 b = uCells[i].zw;
+  float rc = min(uCorner, 0.5*min(b.x, b.y));
+  return sdRoundBox(p - uCells[i].xy, b, rc);
+}
+// x = the blended distance; y = the HALF-THICKNESS of whichever cell dominates
+// here, carried along on the same smin weights. That second channel is what lets
+// the bevel size itself to the form it is rounding (see bevR in main): a fixed
+// bevel is deeper than a narrow form is thick, so the round cross-section gets
+// truncated part-way through its arc — which is why the wide panels looked right
+// and the narrow rows did not.
+// Also carries the DOMINANT CELL's parameters, blended on the same smin weights.
+// The height field below is built analytically from a box, so it needs to know
+// which box it is standing on; the smin weight already answers that, smoothly.
+vec2 glassField(vec2 p, out vec4 cell){
+  float d = cellD(0, p);
+  float t = min(uCells[0].z, uCells[0].w);
+  cell = uCells[0];
+  for(int i=1;i<6;i++){
+    float di = cellD(i, p);
+    float ti = min(uCells[i].z, uCells[i].w);
+    float h = clamp(0.5 + 0.5*(di-d)/uK, 0.0, 1.0);   // the weight smin() uses
+    d = mix(di, d, h) - uK*h*(1.0-h);
+    t = mix(ti, t, h);
+    cell = mix(uCells[i], cell, h);
+  }
+  return vec2(d, t);
+}
+float glassSDF(vec2 p){ vec4 c; return glassField(p, c).x; }
+
+// The cross-section profile, as a function of the 2D distance. Hoisted so the normal
+// can be taken from differences of the HEIGHT rather than of the distance — see main().
+const float PROF_N = 5.0;                    // >2 for curvature continuity
+float profH(float dd, float rimA, float TH){
+  float u = clamp(1.0 - max(-dd, 0.0)/rimA, 0.0, 1.0);
+  return TH*pow(max(1.0 - pow(u, PROF_N), 1e-6), 1.0/PROF_N);
+}
+
+// cursor-reactive field the glass refracts
+vec3 field(vec2 p, vec2 m){
+  float px = 2.0/uRes.y;
+  vec3 col = vec3(0.019,0.025,0.035);
+  col += 0.040*vec3(0.10,0.24,0.32)*(0.6-0.5*length(p*vec2(0.72,1.0)));
+  float gs=9.0; vec2 gd=abs(fract(p*gs-0.5)-0.5); float gw=gs*px;
+  col += (1.0-min(min(gd.x/gw,gd.y/gw),1.0))*vec3(0.16,0.34,0.42)*0.05;
+  float ds=13.0; vec2 dcell=fract(p*ds)-0.5; vec2 dctr=(floor(p*ds)+0.5)/ds;
+  float fade=smoothstep(1.5,0.25,length(dctr*vec2(0.82,1.0)));
+  float dm=distance(dctr,m); float infl=smoothstep(0.62,0.0,dm); infl*=infl;
+  float r=0.10+0.36*infl; float dpix=ds*px;
+  float dotm=smoothstep(dpix,-dpix,length(dcell)-r)*fade;
+  col += dotm*mix(vec3(0.16,0.42,0.54),vec3(0.42,0.80,0.95),infl)*(0.12+0.78*infl);
+  float gb=length(p-m); col += exp(-gb*gb/0.10)*vec3(0.08,0.34,0.40)*0.22;
+  return col;
+}
+
+void main(){
+  vec2 p  = (2.0*gl_FragCoord.xy-uRes)/uRes.y;
+  vec2 m  = (2.0*uMouse-uRes)/uRes.y;
+  vec2 ms = (2.0*uMouseS-uRes)/uRes.y;
+  vec2 ss = (2.0*uSwell-uRes)/uRes.y;   // reactive-glow focal (floats on idle)
+  float px = 2.0/uRes.y;
+
+  // depth layers move by DIFFERENT amounts: dot field deepest (0.35x), glass
+  // mid (1.0x = uPar), DOM text in front (1.6x, applied on the DOM side).
+  vec2 par = uPar;
+  vec2 parF = uPar*0.35;
+  vec4  gcell;
+  vec2  gf = glassField(p - par, gcell);
+  float d = gf.x;
+
+  vec3 base = field(p - parF, ss);   // ss floats on idle -> glow drifts behind glass
+  base *= 1.0 - 0.28*smoothstep(0.06,0.0,d)*step(0.0,d);
+
+  vec3 col = base;
+  float aa = fwidth(d);
+  float inside = smoothstep(aa,-aa,d);
+
+  if (inside > 0.0008){
+    // rounded 3D cross-section: the surface normal sweeps a QUARTER-CIRCLE from
+    // horizontal at the rim to vertical at bevel depth, so thin shapes read as
+    // round tubes (not flat with a hard edge) and thick ones as rounded cards.
+    // bevR is small enough that even the narrow timeline rows complete a full
+    // rounded profile.
+    // The bevel sizes itself to the FORM it is rounding. A fixed radius is fine
+    // on anything thicker than it — you get rim, then flat top — but a narrow
+    // SUPERELLIPSE PROFILE — the squircle logic, applied to the cross-section.
+    //
+    // Under a view down the extrusion axis the first surface a ray meets is exactly
+    // z = Z(s), so this heightfield IS the 3D solid's surface — marching would find
+    // the same points. What was wrong was never the method, it was Z:
+    //   - a cabochon (height rising to the skeleton) puts a RIDGE on the medial axis;
+    //   - a rounded box (flat top + circular fillet) has no ridge, but the fillet
+    //     meets the top with a CURVATURE JUMP — G1, not G2, which is the "not Apple"
+    //     tell however finely it is tuned.
+    // Z = TH(1-u^n)^(1/n) is the superellipse. At the join dZ/ds -> 0 for any n>=2,
+    // but d2Z/ds2 -> 0 only for n>2 — so n>=4 is genuinely curvature-continuous,
+    // by the same argument that makes a squircle corner better than a round one.
+    //
+    // It also disposes of the medial axis rather than fighting it: past rimA the top
+    // is flat, dZ/ds is 0, and the skeleton's garbage gradient is multiplied by zero.
+    float mn   = max(min(gcell.z, gcell.w), 1.5*px);
+    float rimA = 0.55*mn;                     // how far in from the outline the roll runs
+    float TH   = 0.62*mn;                     // half-thickness
+    float zf   = profH(d, rimA, TH);
+
+    // Take the normal from differences of the HEIGHT, not of the distance.
+    // The profile is smooth in d, but the distance field's GRADIENT DIRECTION still
+    // turns through a kink along the 45-degree corner mitre — and there, unlike at
+    // the medial axis, dZ/ds is non-zero, so nothing multiplies it away. Differencing
+    // z averages that kink across the stencil instead of reproducing it exactly, and
+    // it costs the same four field evaluations the gradient did.
+    // Keeping the difference UNNORMALISED also bounds the vertical tangent at the
+    // silhouette to whatever a pixel can actually resolve — the antialiasing is free.
+    float e  = max(px, 0.02*mn);
+    vec2  pp = p - par;
+    float hx = profH(glassSDF(pp+vec2(e,0.0)), rimA, TH) - profH(glassSDF(pp-vec2(e,0.0)), rimA, TH);
+    float hy = profH(glassSDF(pp+vec2(0.0,e)), rimA, TH) - profH(glassSDF(pp-vec2(0.0,e)), rimA, TH);
+    vec3 n = normalize(vec3(-hx, -hy, 2.0*e));
+    float nz = n.z;
+    float rimP = clamp(1.0 - n.z, 0.0, 1.0);  // 0 on the flat, 1 where it turns over
+    vec2 g2 = length(n.xy) > 1e-6 ? normalize(n.xy) : vec2(0.0);   // outward
+    vec2 sampleP = p*0.985 + g2*(0.9*mn*rimP);
+    float blurR = min(0.0024, 0.06*mn)*(0.45+1.7*rimP);
+    const float GA = 2.399963;
+    float ja = hash21(gl_FragCoord.xy+uTime)*6.28318;
+    vec3 refr = vec3(0.0);
+    for(int i=0;i<8;i++){
+      float fi=float(i); float rr=sqrt((fi+0.5)/8.0)*blurR; float ang=fi*GA+ja;
+      refr += field(sampleP - parF + vec2(cos(ang),sin(ang))*rr, ss);
+    }
+    refr/=8.0;
+    refr = mix(refr, refr*vec3(0.88,0.98,1.07)+0.014, 0.5);
+    // INTERIOR DENSITY. Glass this thick isn't optically neutral, and the copy
+    // is printed on it — raw, the reactive dots punch through bright enough to
+    // erase 12.5px body text (measured: 1.1:1 at the 5th percentile). Compress
+    // rather than dim: a Reinhard curve leaves the darks alone and crushes only
+    // the peaks, so the field still visibly refracts through the form while its
+    // highlights stop blowing out the text. The rim/bevel are excluded, so the
+    // form still reads as glass rather than a tinted card.
+    // ramp fast: the thin forms (timeline rows, the eyebrow label plate) are
+    // only ~27px tall, so a slow ramp would never reach full density where their
+    // text actually sits — which is precisely where it was still washing out.
+    float body = smoothstep(0.0, min(0.012, 0.55*mn), -d);
+    refr = mix(refr, refr/(1.0 + 4.2*refr), body);
+    float fres = pow(1.0-clamp(n.z,0.0,1.0),4.0);
+    vec3 L=normalize(uLight); vec3 H=normalize(L+vec3(0,0,1));
+    // SPECULAR ANTIALIASING. The lobe is tight (96), which is right for a big form
+    // where the normal sweeps across many pixels. On a small one the entire sweep is
+    // packed into ~10px of end cap, so the highlight's iso-contours bunch up and the
+    // lobe lands on a sub-pixel line — read by the eye as a hard CREASE, which is
+    // what still looked broken on the narrow rows after the geometry was already
+    // smooth. Widen (and dim) the lobe in proportion to how fast the normal is
+    // actually turning on screen: no effect on large forms, dissolves the spike on
+    // small ones. Same idea as Toksvig/LEAN normal-variance roughness.
+    float nv=length(fwidth(n));
+    float spec=pow(max(dot(n,H),0.0), 96.0/(1.0+90.0*nv))/(1.0+7.0*nv);
+    float rimLine=smoothstep(max(min(0.009,0.20*mn),1.2*px),0.0,abs(d));
+    vec3 glass=refr;
+    glass += fres*vec3(0.28,0.72,0.82)*0.5;
+    glass += spec*vec3(0.82,0.94,1.0)*0.55;
+    glass += rimLine*vec3(0.32,0.80,0.90)*(0.32+0.5*fres);
+    col = mix(base, glass, inside);
+    if (uDbg > 0.5) col = mix(base, n*0.5+0.5, inside);              // normal
+    if (uDbg > 1.5) col = mix(base, vec3(rimP, zf/max(0.72*mn,1e-4), 0.0), inside); // rimP / height
+    if (uDbg > 2.5) col = mix(base, vec3(spec), inside);             // specular only
+    if (uDbg > 3.5) col = mix(base, refr, inside);                   // refraction only
+    if (uDbg > 4.5) col = mix(base, vec3(fres), inside);             // fresnel only
+  }
+  col += (hash21(gl_FragCoord.xy+uTime)-0.5)*0.010;
+  frag = vec4(pow(clamp(col,0.0,1.0),vec3(0.95)),1.0);
+}
+</script>
+
+<script>
+const canvas=document.getElementById('gl');
+const gl=canvas.getContext('webgl2',{antialias:false,alpha:false});
+const RO=document.getElementById('readout');
+function fail(m){ RO.innerHTML='<span class="err">'+m+'</span>'; }
+if(!gl){ fail('WebGL2 unavailable'); throw new Error('no webgl2'); }
+const VERT=`#version 300 es
+void main(){ vec2 v=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(v*2.0-1.0,0.0,1.0); }`;
+function sh(t,s){ const o=gl.createShader(t); gl.shaderSource(o,s); gl.compileShader(o);
+  if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)){ fail(gl.getShaderInfoLog(o)); throw new Error(gl.getShaderInfoLog(o)); } return o; }
+const prog=gl.createProgram();
+gl.attachShader(prog,sh(gl.VERTEX_SHADER,VERT));
+gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,document.getElementById('frag').textContent));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ fail(gl.getProgramInfoLog(prog)); throw new Error('link'); }
+gl.useProgram(prog);
+const U=n=>gl.getUniformLocation(prog,n);
+const uRes=U('uRes'),uMouse=U('uMouse'),uMouseS=U('uMouseS'),uTime=U('uTime'),uCells=U('uCells[0]'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg');
+const stage=document.querySelector('.stage');
+
+// ---- morph states DERIVED FROM the DOM content: measure where each state's
+// elements sit and shape the glass to HOLD them, so glass + content are always
+// married and responsive. A cell = [cx,cy,hx,hy] in the shader's y-normalized
+// space; a DOM rect (css px) maps in via R().
+const secs=[...document.querySelectorAll('.state')];
+const N=secs.length;
+function Rr(r, px, py){
+  const iw=innerWidth, ih=innerHeight;
+  return [ (2*(r.left+r.width/2)-iw)/ih, 1-2*(r.top+r.height/2)/ih,
+           (r.width/2+px)*2/ih, (r.height/2+py)*2/ih ];
+}
+function R(el, px, py){ return Rr(el.getBoundingClientRect(), px, py); }
+// the INKED box of an element's text, not its block box — a centred one-line
+// label reports full container width, which would make a rail instead of a pill.
+function Rtext(el, px, py){
+  const rng=document.createRange(); rng.selectNodeContents(el);
+  return Rr(rng.getBoundingClientRect(), px, py);
+}
+const rep=c=>[c,c,c,c,c,c];                       // one form: all 6 cells coincident
+let STATES=[];
+function buildStates(){
+  // pad kept tight (esp. the separation axis) so cssGap − 2·pad clears k — see
+  // the .grid/.rows gaps in CSS. Then the settled k below is tiny → real gaps.
+  // tighter padding on phones so single-form glass fits the narrow width and
+  // the single-column stacks still clear the blend (see the mobile CSS gaps).
+  const mob = innerWidth < 680;
+  // The shader's bevel (bevR) rounds this much of every form's edge inward. Copy
+  // sitting closer to the rim than that rides the rounded shoulder rather than
+  // the flat interior — which is exactly what made the eyebrow labels look stuck
+  // to the top edge. Scale the vertical pad with it so it holds at any viewport.
+  const BEV = 0.05*innerHeight/2;                       // must track bevR in the shader
+  const clear = v => Math.max(v, BEV + (mob?6:12));
+  const items=[...secs[2].querySelectorAll('.grid .cell')].map(el=>R(el, mob?13:15, mob?8:15));
+  const rows =[...secs[3].querySelectorAll('.rows .row')].map(el=>R(el, mob?12:14, mob?5:9));
+  // states 2 and 3 break into separate forms, so their eyebrow has no form to sit
+  // in — give it its own label plate, at the SAME cell index in both so the plate
+  // persists across the 2→3 morph instead of necking out of a panel.
+  // a touch of extra height on the plate so its label clears the density ramp
+  const eyeb = i => Rtext(secs[i].querySelector('.eyebrow'), mob?11:15, mob?7:10);
+  const fill=(a)=>{ a=a.slice(); while(a.length<6) a.push(a[a.length-1]); return a.slice(0,6); };
+  // kSettle: near-zero for SEPARATED states so panels/rows end up genuinely
+  // distinct at rest; the gooey necking happens only mid-morph (GOO bump below).
+  // corner values are generous (rounder squircle); the shader clamps them per
+  // cell to stay valid at any size.
+  STATES=[
+    {cells:rep(R(secs[0], mob?8:46, clear(mob?26:40))), k:0.16, corner:0.15},    // identity — lens
+    {cells:rep(R(secs[1], mob?8:40, clear(mob?22:34))), k:0.16, corner:0.15},    // method — card
+    {cells:fill([items[0],items[1],items[2],eyeb(2),items[0],items[1]]), k:0.005, corner:0.06}, // work — 3 SEPARATE panels + label plate
+    {cells:fill([rows[0],rows[1],rows[2],eyeb(3),rows[3],rows[4]]), k:0.006, corner:0.05},      // experience — SEPARATE rows + label plate
+    {cells:rep(R(secs[4], mob?8:40, clear(mob?22:34))), k:0.16, corner:0.16},    // contact — card
+  ];
+}
+buildStates();
+
+// spring-smoothed live cell params
+let cur={ cells:STATES[0].cells.map(c=>c.slice()), k:STATES[0].k, corner:STATES[0].corner };
+const cellBuf=new Float32Array(24);
+function lerpState(a,b,t){
+  const out={cells:[],k:a.k+(b.k-a.k)*t,corner:a.corner+(b.corner-a.corner)*t};
+  for(let i=0;i<6;i++){ const A=a.cells[i],B=b.cells[i]; out.cells.push([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t,A[3]+(B[3]-A[3])*t]); }
+  return out;
+}
+const ease=x=>x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+
+// scroll -> (stateA,stateB,morphT) with dwell zones (read) + morph zones (transition)
+const hint=document.getElementById('hint');
+const r_state=document.getElementById('r_state');
+let morphAmt=0;   // 0 at a settled state, 1 mid-transition — drives the goo bump
+function scrollTarget(){
+  const max=document.getElementById('scroll').offsetHeight - innerHeight;
+  const p=Math.min(Math.max((scrollY)/(max||1),0),1);
+  const s=p*(N-1);
+  const i=Math.min(Math.floor(s),N-2);
+  const frac=s-i;
+  const mt=ease(Math.min(Math.max((frac-0.32)/0.36,0),1));   // dwell<0.32, morph .32-.68, dwell>0.68
+  morphAmt=4*mt*(1-mt);   // 0 at the ends (settled = crisp/separate), 1 mid-morph (gooey neck)
+  // DOM content opacity: state i visible when dwelling on it
+  for(let k=0;k<N;k++){
+    let o=0;
+    if(k===i)   o=1-Math.min(Math.max((frac-0.30)/0.20,0),1);
+    if(k===i+1) o=Math.min(Math.max((frac-0.50)/0.20,0),1);
+    secs[k].style.opacity=o.toFixed(3);
+    secs[k].classList.toggle('on', o>0.5);
+  }
+  hint.style.opacity = p>0.02 ? '0':'0.8';
+  r_state.textContent = String(i+ (mt>0.5?2:1)).padStart(2,'0')+' / '+String(N).padStart(2,'0');
+  return lerpState(STATES[i],STATES[i+1],mt);
+}
+
+let W=0,H=0,dpr=1;
+const r_res=document.getElementById('r_res'),r_fps=document.getElementById('r_fps'),r_cur=document.getElementById('r_cur');
+function resize(){ dpr=Math.min(window.devicePixelRatio||1,2); W=Math.floor(innerWidth*dpr); H=Math.floor(innerHeight*dpr);
+  canvas.width=W; canvas.height=H; gl.viewport(0,0,W,H); r_res.textContent=`${(W*H/1e6).toFixed(1)} Mpx`; buildStates(); }
+addEventListener('resize',resize); resize();
+document.fonts && document.fonts.ready.then(buildStates);   // re-measure once text metrics settle
+
+let mx=W*0.5,my=H*0.5,sx=mx,sy=my,wx=mx,wy=my;
+let ancX=wx,ancY=wy,ancLX=0,ancLY=0,ancSet=false;   // idle-float anchor
+// idle-return: parallax + reactive swell drift back to center when the pointer
+// stays still. A deadband ignores minor jitter so it doesn't
+// count as movement.
+let activeX=mx,activeY=my,lastActive=-1e9;
+const IDLE_MS=800;                         // hold still this long, then drift home
+function moved(nx,ny){
+  const marg=10*dpr;                       // minor-movement margin (~10 css px)
+  if((nx-activeX)**2+(ny-activeY)**2 > marg*marg){ activeX=nx; activeY=ny; lastActive=performance.now(); }
+}
+addEventListener('pointermove',e=>{ const nx=e.clientX*dpr, ny=(innerHeight-e.clientY)*dpr; moved(nx,ny); mx=nx; my=ny; },{passive:true});
+// touch/tap (or mouse press): jump the focal to the touch point and go active,
+// so tapping the screen moves the reactive glow there even without a drag
+addEventListener('pointerdown',e=>{ const nx=e.clientX*dpr, ny=(innerHeight-e.clientY)*dpr; activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; },{passive:true});
+const sgn=v=>(v<0?'−':'+')+Math.abs(v).toFixed(2);
+
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---- inspection views. A curvature break is often INVISIBLE in the final render
+// (a C1 discontinuity leaves the value continuous) but obvious in the normal map, so
+// being able to flip between them while scrolling the real page is the only reliable
+// way to sweep the whole thing for discontinuities. Press `n` to cycle.
+const DBG_NAMES = ['render','normals','profile','specular','refraction','fresnel'];
+const r_dbg = document.getElementById('r_dbg');
+window.__dbg = 0;
+addEventListener('keydown', e => {
+  if (e.key !== 'n' && e.key !== 'N') return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  window.__dbg = (window.__dbg + 1) % DBG_NAMES.length;
+  r_dbg.textContent = DBG_NAMES[window.__dbg];
+  document.body.classList.toggle('dbg', window.__dbg > 0);
+});
+
+let frames=0,fpsT=performance.now(),fps=0;
+function loop(now){
+  const tgt=scrollTarget();
+  // spring the live params toward target (frost-like smoothing)
+  const sp=reduced?1:0.16;
+  cur.k+=(tgt.k-cur.k)*sp; cur.corner+=(tgt.corner-cur.corner)*sp;
+  for(let i=0;i<6;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]+=(tgt.cells[i][j]-cur.cells[i][j])*sp; cellBuf[i*4+j]=cur.cells[i][j]; } }
+  // follow the cursor while active; when idle past IDLE_MS, ease back to center
+  // (slower rate) so the parallax + swell settle to the default resting pose
+  const active=(now-lastActive)<IDLE_MS;
+  // parallax focal (glass) -> rests centered when idle
+  const tgx=active?mx:W*0.5, tgy=active?my:H*0.5;
+  const rate=reduced?1:(active?0.12:0.02);   // slow, gentle drift home when idle
+  sx+=(tgx-sx)*rate; sy+=(tgy-sy)*rate;
+  // reactive-glow focal -> follows the cursor when active, but on idle FLOATS on
+  // a slow wandering path so the glow drifts behind the (resting) glass and
+  // shows off the refraction. reduced-motion: hold it centered.
+  // the wander is ANCHORED where the glow was when it went idle, and drifts
+  // RELATIVELY from there — so it eases off its last position instead of darting
+  // to a fixed path point. Bounded to stay on screen.
+  const t=now*0.001;
+  const lissX = W*0.26*Math.sin(t*0.09) + W*0.10*Math.sin(t*0.041+1.7);
+  const lissY = H*0.26*Math.sin(t*0.073+2.0) + H*0.10*Math.sin(t*0.035);
+  if(active){ ancSet=false; }
+  else if(!ancSet){ ancX=wx; ancY=wy; ancLX=lissX; ancLY=lissY; ancSet=true; }
+  let swx,swy;
+  if(reduced){ swx=W*0.5; swy=H*0.5; }
+  else if(active){ swx=mx; swy=my; }
+  else {
+    swx=Math.min(Math.max(ancX+(lissX-ancLX), W*0.08), W*0.92);
+    swy=Math.min(Math.max(ancY+(lissY-ancLY), H*0.08), H*0.92);
+  }
+  wx+=(swx-wx)*(active?0.12:0.06); wy+=(swy-wy)*(active?0.12:0.06);
+  // cursor parallax: ONE offset drives both the glass (uPar) and the DOM text
+  // (matching px translate), so they travel together over the dot field and
+  // the text never drifts toward the glass edge.
+  const msx=(2*sx-W)/H, msy=(2*sy-H)/H, PAR=0.024, TEXT_PAR=1.6;
+  let parx=PAR*msx, pary=PAR*msy;
+  // text is the FRONT layer — it moves more than the glass (1.6x) for depth
+  const tx=parx*TEXT_PAR*innerHeight/2, ty=-pary*TEXT_PAR*innerHeight/2;
+  stage.style.transform=`translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px)`;
+  // goo bump: add blend only mid-morph, so forms neck/flow while transitioning
+  // but end up genuinely separate (k -> its small settle value) at rest
+  const kLive = cur.k + 0.085*morphAmt;
+  gl.uniform2f(uRes,W,H); gl.uniform2f(uMouse,mx,my); gl.uniform2f(uMouseS,sx,sy);
+  gl.uniform2f(uPar,parx,pary); gl.uniform2f(uSwell,wx,wy);
+  gl.uniform3f(uLight, -0.42, 0.60, 0.72);
+  gl.uniform1f(uDbg, window.__dbg||0);   // dev inspection hook (see tests/glass-zoom.js)
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  const nx=(2*mx-W)/H, ny=(2*my-H)/H; r_cur.textContent=`x ${sgn(nx)} y ${sgn(ny)}`;
+  frames++; if(now-fpsT>=500){ fps=Math.round(frames*1000/(now-fpsT)); frames=0; fpsT=now; r_fps.textContent=String(fps); }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
 </body>
 </html>
