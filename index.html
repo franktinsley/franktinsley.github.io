@@ -589,10 +589,16 @@ function loop(now){
     swy=Math.min(Math.max(ancY+(lissY-ancLY), H*0.08), H*0.92);
   }
   wx+=(swx-wx)*(active?0.12:0.06); wy+=(swy-wy)*(active?0.12:0.06);
-  // cursor parallax: ONE offset drives both the glass (uPar) and the DOM text
-  // (matching px translate), so they travel together over the dot field and
-  // the text never drifts toward the glass edge.
-  const msx=(2*sx-W)/H, msy=(2*sy-H)/H, PAR=0.024, TEXT_PAR=1.6;
+  // Cursor parallax: ONE offset drives both the glass (uPar) and the DOM text
+  // (matching px translate), so they travel together over the dot field and the
+  // text never drifts toward the glass edge.
+  //
+  // PAR is 0 — parallax is OFF. On touch it reads as the whole page sliding around
+  // under your finger while you are trying to scroll, which is worse than the depth
+  // cue is worth. The machinery is left intact: restore PAR to 0.024 to bring it
+  // back, ideally pointer-only (`matchMedia('(hover: hover)')`) rather than for
+  // every input.
+  const msx=(2*sx-W)/H, msy=(2*sy-H)/H, PAR=0.0, TEXT_PAR=1.6;
   let parx=PAR*msx, pary=PAR*msy;
   // text is the FRONT layer — it moves more than the glass (1.6x) for depth
   const tx=parx*TEXT_PAR*innerHeight/2, ty=-pary*TEXT_PAR*innerHeight/2;
