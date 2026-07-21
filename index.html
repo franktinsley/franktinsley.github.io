@@ -433,7 +433,7 @@ const stage=document.querySelector('.stage');
 const secs=[...document.querySelectorAll('.state')];
 const N=secs.length;
 function Rr(r, px, py){
-  const iw=innerWidth, ih=innerHeight;
+  const iw=innerWidth, ih=document.documentElement.clientHeight;   // layout vp, see resize()
   return [ (2*(r.left+r.width/2)-iw)/ih, 1-2*(r.top+r.height/2)/ih,
            (r.width/2+px)*2/ih, (r.height/2+py)*2/ih ];
 }
@@ -475,7 +475,7 @@ function buildStates(){
   // sitting closer to the rim than that rides the rounded shoulder rather than
   // the flat interior — which is exactly what made the eyebrow labels look stuck
   // to the top edge. Scale the vertical pad with it so it holds at any viewport.
-  const BEV = 0.05*innerHeight/2;                       // must track bevR in the shader
+  const BEV = 0.05*document.documentElement.clientHeight/2;   // must track bevR in the shader
   const clear = v => Math.max(v, BEV + (mob?6:12));
   const items=[...secs[2].querySelectorAll('.grid .cell')].map(el=>R(el, mob?13:15, mob?8:15));
   const rows =[...secs[3].querySelectorAll('.rows .row')].map(el=>R(el, mob?12:14, mob?5:9));
@@ -536,7 +536,17 @@ function scrollTarget(){
 
 let W=0,H=0,dpr=1;
 const r_res=document.getElementById('r_res'),r_fps=document.getElementById('r_fps'),r_cur=document.getElementById('r_cur');
-function resize(){ dpr=Math.min(window.devicePixelRatio||1,2); W=Math.floor(innerWidth*dpr); H=Math.floor(innerHeight*dpr);
+// Vertical reference is the LAYOUT viewport (documentElement.clientHeight), NOT
+// innerHeight. On iOS innerHeight is the VISUAL viewport — it shrinks and grows as
+// the Safari toolbar animates — while the CSS boxes here (#gl height:100vh, .stage
+// inset:0) are sized by the LAYOUT viewport, which stays put. Sizing the WebGL buffer
+// (and normalising the DOM rects in R()) by innerHeight stretched the glass into the
+// 100vh box by a factor that changed as the toolbar moved, so it drifted vertically
+// against the pinned DOM text on every scroll. clientHeight matches the CSS boxes and
+// is stable across the toolbar animation, so the two layers stay locked. Width keeps
+// innerWidth (= 100vw; clientWidth would drop the desktop scrollbar and mismatch).
+const vpH = () => document.documentElement.clientHeight;
+function resize(){ dpr=Math.min(window.devicePixelRatio||1,2); W=Math.floor(innerWidth*dpr); H=Math.floor(vpH()*dpr);
   canvas.width=W; canvas.height=H; gl.viewport(0,0,W,H); r_res.textContent=`${(W*H/1e6).toFixed(1)} Mpx`; buildStates(); }
 addEventListener('resize',resize); resize();
 document.fonts && document.fonts.ready.then(buildStates);   // re-measure once text metrics settle
@@ -552,10 +562,10 @@ function moved(nx,ny){
   const marg=10*dpr;                       // minor-movement margin (~10 css px)
   if((nx-activeX)**2+(ny-activeY)**2 > marg*marg){ activeX=nx; activeY=ny; lastActive=performance.now(); }
 }
-addEventListener('pointermove',e=>{ const nx=e.clientX*dpr, ny=(innerHeight-e.clientY)*dpr; moved(nx,ny); mx=nx; my=ny; },{passive:true});
+addEventListener('pointermove',e=>{ const nx=e.clientX*dpr, ny=(vpH()-e.clientY)*dpr; moved(nx,ny); mx=nx; my=ny; },{passive:true});
 // touch/tap (or mouse press): jump the focal to the touch point and go active,
 // so tapping the screen moves the reactive glow there even without a drag
-addEventListener('pointerdown',e=>{ const nx=e.clientX*dpr, ny=(innerHeight-e.clientY)*dpr; activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; },{passive:true});
+addEventListener('pointerdown',e=>{ const nx=e.clientX*dpr, ny=(vpH()-e.clientY)*dpr; activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; },{passive:true});
 const sgn=v=>(v<0?'−':'+')+Math.abs(v).toFixed(2);
 
 const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
