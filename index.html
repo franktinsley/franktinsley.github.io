@@ -444,7 +444,26 @@ function Rtext(el, px, py){
   const rng=document.createRange(); rng.selectNodeContents(el);
   return Rr(rng.getBoundingClientRect(), px, py);
 }
-const rep=c=>[c,c,c,c,c,c];                       // one form: all 6 cells coincident
+// One form: all 6 cells coincident. But the polynomial smin is NOT idempotent —
+// smin(a,a,k) = a - k/4 — so unioning six identical cells subtracts a constant from
+// the whole field five times over, and a constant offset on an SDF moves its zero
+// crossing: the drawn silhouette inflates outward by that much, everywhere. At
+// k=0.16 that is ~0.6k, i.e. ~45px on a phone and ~65px on desktop, which is how a
+// form measured to sit inside the bezel ended up drawn past it.
+// Run the same recurrence the shader will run and shrink the cell by exactly what
+// it is about to add back. Separated states need no such correction: their k is
+// ~0.005, so the same error is about a pixel.
+function repGrowth(k){
+  let d = 0;                                   // distances relative to one cell
+  for (let i = 1; i < 6; i++){
+    const h = Math.min(Math.max(0.5 + 0.5*(0 - d)/k, 0), 1);
+    d = (d - 0)*h - k*h*(1.0 - h);
+  }
+  return -d;                                   // how far the silhouette would grow
+}
+const rep=(c,k)=>{ const g=repGrowth(k);
+  const t=[c[0], c[1], Math.max(c[2]-g, 0.004), Math.max(c[3]-g, 0.004)];
+  return [t,t,t,t,t,t]; };
 let STATES=[];
 function buildStates(){
   // pad kept tight (esp. the separation axis) so cssGap − 2·pad clears k — see
@@ -471,11 +490,11 @@ function buildStates(){
   // corner values are generous (rounder squircle); the shader clamps them per
   // cell to stay valid at any size.
   STATES=[
-    {cells:rep(R(secs[0], mob?8:46, clear(mob?26:40))), k:0.16, corner:0.15},    // identity — lens
-    {cells:rep(R(secs[1], mob?8:40, clear(mob?22:34))), k:0.16, corner:0.15},    // method — card
+    {cells:rep(R(secs[0], mob?8:46, clear(mob?26:40)), 0.16), k:0.16, corner:0.15},    // identity — lens
+    {cells:rep(R(secs[1], mob?8:40, clear(mob?22:34)), 0.16), k:0.16, corner:0.15},    // method — card
     {cells:fill([items[0],items[1],items[2],eyeb(2),items[0],items[1]]), k:0.005, corner:0.06}, // work — 3 SEPARATE panels + label plate
     {cells:fill([rows[0],rows[1],rows[2],eyeb(3),rows[3],rows[4]]), k:0.006, corner:0.05},      // experience — SEPARATE rows + label plate
-    {cells:rep(R(secs[4], mob?8:40, clear(mob?22:34))), k:0.16, corner:0.16},    // contact — card
+    {cells:rep(R(secs[4], mob?8:40, clear(mob?22:34)), 0.16), k:0.16, corner:0.16},    // contact — card
   ];
 }
 buildStates();
