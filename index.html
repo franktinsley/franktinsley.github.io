@@ -13,7 +13,7 @@
        tone used for copy ON the glass measures ~2:1 against the lit dot field,
        so recessive metadata that rides the instrument gets its own step up. */
     --dim-on:#8ba3b0;
-    --line:rgba(120,200,215,0.10); --bg:#06080c;
+    --line:rgba(120,200,215,0.10);
     --bg-edge:#050609;  /* measured field colour at the vertical edge — see html{} */
     --bleed:0px;   /* see #gl — non-zero rescales the whole background */
     --mono: ui-monospace,"SF Mono","SFMono-Regular",Menlo,monospace;
@@ -303,6 +303,12 @@ uniform vec2  uPar;        // glass parallax offset — the DOM text gets the sa
 uniform vec2  uSwell;      // reactive-glow focal point (floats on idle)
 uniform vec3  uLight;      // key-light direction
 uniform float uDbg;        // dev: 1 = show shading normal, 2 = show profile terms
+uniform float uRough;      // surface roughness. 0 = polished, 1 = matte. Shipped = 0.64.
+                           // Drives BOTH the specular lobe width and the transmission
+                           // blur, the way a real material model would — the previous
+                           // knob only touched transmission, which is why changing it
+                           // did not read as a smoothness change at all.
+uniform float uCompK;      // 1 = the shipped interior compression, 0 = no darkening through the glass
 out vec4 frag;
 
 // squircle rounded box: the corner uses a 4-norm instead of length() (2-norm),
@@ -456,7 +462,11 @@ void main(){
     float rimP = clamp(1.0 - n.z, 0.0, 1.0);  // 0 on the flat, 1 where it turns over
     vec2 g2 = length(n.xy) > 1e-6 ? normalize(n.xy) : vec2(0.0);   // outward
     vec2 sampleP = p*0.985 + g2*(0.9*mn*rimP);
-    float blurR = min(0.0024, 0.06*mn)*(0.45+1.7*rimP);
+
+    // Transmission blur scales with roughness (a rough surface scatters what passes
+    // THROUGH it as well as what bounces off). Normalised so uRough = 0.64 reproduces
+    // the shipped amount exactly.
+    float blurR = min(0.0024, 0.06*mn)*(0.45+1.7*rimP)*(uRough/0.64);
     const float GA = 2.399963;
     float ja = hash21(gl_FragCoord.xy+uTime)*6.28318;
     vec3 refr = vec3(0.0);
@@ -478,7 +488,12 @@ void main(){
     // only ~27px tall, so a slow ramp would never reach full density where their
     // text actually sits — which is precisely where it was still washing out.
     float body = smoothstep(0.0, min(0.012, 0.55*mn), -d);
-    refr = mix(refr, refr/(1.0 + 4.2*refr), body);
+    // uCompK scales the interior density. This Reinhard curve is the ONLY thing
+    // darkening what you see through the glass — it crushes the field's highlights
+    // so the reactive dots stop erasing the copy printed on the form. At 0 the glass
+    // is optically neutral and the dots come through at full strength, which is
+    // exactly the legibility problem it was added to solve: measure before keeping.
+    refr = mix(refr, refr/(1.0 + 4.2*uCompK*refr), body*step(0.001, uCompK));
     float fres = pow(1.0-clamp(n.z,0.0,1.0),4.0);
     vec3 L=normalize(uLight); vec3 H=normalize(L+vec3(0,0,1));
     // SPECULAR ANTIALIASING. The lobe is tight (96), which is right for a big form
@@ -490,7 +505,15 @@ void main(){
     // actually turning on screen: no effect on large forms, dissolves the spike on
     // small ones. Same idea as Toksvig/LEAN normal-variance roughness.
     float nv=length(fwidth(n));
-    float spec=pow(max(dot(n,H),0.0), 96.0/(1.0+90.0*nv))/(1.0+7.0*nv);
+    // Specular lobe width IS the surface smoothness. 96 was hardcoded; it is now the
+    // uRough = 0.64 point of mix(240, 14), so the shipped look is unchanged at the
+    // default. A tight lobe (240) reads polished, a broad one (14) reads matte.
+    // The nv term stays: it is antialiasing (Toksvig), not roughness, and it widens
+    // the lobe where the normal turns fast on screen so small forms do not crease.
+    // Broader lobes gather more energy, so dim with roughness or matte blows out.
+    float shin = mix(240.0, 14.0, clamp(uRough,0.0,1.0));
+    float spec=pow(max(dot(n,H),0.0), shin/(1.0+90.0*nv))/(1.0+7.0*nv);
+    spec *= mix(1.0, 0.45, clamp(uRough,0.0,1.0));
     float rimLine=smoothstep(max(min(0.009,0.20*mn),1.2*px),0.0,abs(d));
     vec3 glass=refr;
     glass += fres*vec3(0.28,0.72,0.82)*0.5;
@@ -556,7 +579,7 @@ gl.linkProgram(prog);
 if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ fail(gl.getProgramInfoLog(prog)); throw new Error('link'); }
 gl.useProgram(prog);
 const U=n=>gl.getUniformLocation(prog,n);
-const uRes=U('uRes'),uMouse=U('uMouse'),uMouseS=U('uMouseS'),uTime=U('uTime'),uCells=U('uCells[0]'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg');
+const uRes=U('uRes'),uMouse=U('uMouse'),uMouseS=U('uMouseS'),uTime=U('uTime'),uCells=U('uCells[0]'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),uRough=U('uRough'),uCompK=U('uCompK');
 gl.enable(gl.BLEND);
 gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -629,6 +652,27 @@ function drawBg(now){
   bgl.uniform1f(bU.uTime, now*0.001);
   bgl.drawArrays(bgl.TRIANGLES,0,3);
 }
+
+// Two glass qualities that are taste, not correctness, exposed so they can be
+// compared on the device instead of argued about:
+//   rough      surface roughness: the SPECULAR LOBE WIDTH, which is what actually
+//              communicates smoothness, plus the transmission blur alongside it
+//   comp 1->0  the interior compression, the only thing darkening the view THROUGH
+//              the glass. It exists for LEGIBILITY (the reactive dots were measured
+//              erasing 12.5px copy at 1.1:1), so turning it off is a legibility
+//              change, not just a look change — re-measure before keeping it.
+const ROUGH_SHIPPED = 0.64;   // reproduces the hardcoded specular exponent of 96
+// Owner's pick, made after seeing the legibility cost: polished and fully clear.
+// rough 0.06 = a tight specular lobe. comp 0 = no interior compression, so the field
+// comes through the glass at full strength.
+const glassOpt = { rough: 0.06, comp: 0 };
+{
+  const q=(location.search.match(/[?&]glass=([^&]*)/)||[])[1]||'';
+  if(/smooth|polish/.test(q)) glassOpt.rough=0.06;
+  if(/matte|rough/.test(q))   glassOpt.rough=1.0;
+  if(/clear/.test(q))         glassOpt.comp=0;
+}
+window.glass = glassOpt;
 
 const stage=document.querySelector('.stage');
 
@@ -911,14 +955,14 @@ function loop(now){
   gl.uniform2f(uPar,parx,pary); gl.uniform2f(uSwell,wx,wy);
   gl.uniform3f(uLight, -0.42, 0.60, 0.72);
   gl.uniform1f(uDbg, window.__dbg||0);   // dev inspection hook (see tests/glass-zoom.js)
+  // Live A/B knobs for the two glass qualities that are matters of taste rather than
+  // correctness. Set from the console (glass.rough = 0) or ?glass=smooth / matte /
+  // clear, or just ?glass for the cycle button.
+  gl.uniform1f(uRough, glassOpt.rough);
+  gl.uniform1f(uCompK, glassOpt.comp);
   gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive);
   gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);   // transparent: #bg shows through
   gl.drawArrays(gl.TRIANGLES,0,3);
-  // ?edgecolor / console: sample the REAL composited edge rows. Must run here,
-  // immediately after the draw — without preserveDrawingBuffer the drawing buffer
-  // is undefined once the frame is composited, so a readPixels from outside the
-  // loop returns nothing useful. The band colour has to come from the rendered
-  // pixels, not from re-deriving the shader by hand.
   const nx=(2*mx-W)/H, ny=(2*my-H)/H; r_cur.textContent=`x ${sgn(nx)} y ${sgn(ny)}`;
   frames++; if(now-fpsT>=500){ fps=Math.round(frames*1000/(now-fpsT)); frames=0; fpsT=now; r_fps.textContent=String(fps); }
   requestAnimationFrame(loop);
@@ -961,6 +1005,45 @@ if(/(^|[?&])top($|[=&])/.test(location.search)){
   const abs=document.body.lastElementChild.previousElementSibling;
   (function t(){ requestAnimationFrame(t); })();
   void fx; void abs;
+}
+
+// ---- ?glass — a cycle button, because these differences are too small to hold in
+// your head across a page reload. Tap to step through the four combinations in
+// place; the label says which one you are looking at. Also bound to "g" on desktop.
+// Gated on the query param, so it can never appear on the live site.
+if(/(^|[?&])glass($|[=&])/.test(location.search)){
+  const MODES=[
+    {rough:ROUGH_SHIPPED, comp:1, label:'shipped'},
+    {rough:0.06,          comp:1, label:'polished'},
+    {rough:1.0,           comp:1, label:'matte'},
+    {rough:0.06,          comp:0,    label:'polished + clear'},
+    // The legible compromise. Measured with tests/legibility-probe on state 3, which
+    // is the page's worst case (the recessive mono year labels): comp 0 -> p05 1.01,
+    // 0.35 -> 2.73, 0.6 -> 3.82, 0.85 -> 4.60, 1 -> 4.94. Target for those labels is
+    // >=3, so 0.6 clears it with margin while giving up most of the darkening.
+    // comp 0 is 1.01:1 — functionally invisible text, not a marginal call.
+    {rough:0.06,          comp:0.6,  label:'polished + clear 60%'},
+  ];
+  let mi=MODES.findIndex(m=>m.rough===glassOpt.rough && m.comp===glassOpt.comp);
+  if(mi<0) mi=0;
+  const b=document.createElement('button');
+  b.style.cssText='position:absolute;top:62px;right:16px;z-index:9;'+   // clears the nameplate on narrow screens
+    
+    'pointer-events:auto;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;'+
+    'min-height:44px;padding:0 14px;border:1px solid var(--cy-soft);border-radius:3px;'+
+    'background:rgba(6,8,12,0.82);color:var(--cy);font:600 11px/1 var(--mono);'+
+    'letter-spacing:0.16em;text-transform:uppercase;cursor:pointer;';
+  const apply=()=>{
+    glassOpt.rough=MODES[mi].rough; glassOpt.comp=MODES[mi].comp;
+    b.textContent=(mi+1)+'/'+MODES.length+' · '+MODES[mi].label+' ▸';
+  };
+  const step=()=>{ mi=(mi+1)%MODES.length; apply(); };
+  b.addEventListener('click',step);
+  addEventListener('keydown',e=>{ if(e.key==='g'||e.key==='G') step(); });
+  apply();
+  // into #chrome so it rides the safe box and the Safari toolbar like the rest of
+  // the bezel; #chrome is pointer-events:none, hence the explicit auto above.
+  chromeEl.appendChild(b);
 }
 
 // ---- ?edge — settles "can the page paint into the safe area / Safari chrome?"
