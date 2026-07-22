@@ -14,28 +14,62 @@
        so recessive metadata that rides the instrument gets its own step up. */
     --dim-on:#8ba3b0;
     --line:rgba(120,200,215,0.10); --bg:#06080c;
+    --bg-edge:#050609;  /* measured field colour at the vertical edge — see html{} */
+    --bleed:0px;   /* see #gl — non-zero rescales the whole background */
     --mono: ui-monospace,"SF Mono","SFMono-Regular",Menlo,monospace;
     --sans: system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
   }
   *{ box-sizing:border-box; }
-  html,body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); overflow-x:hidden; }
+  /* The rubber-band bounce is deliberately NOT suppressed. It was, briefly, because
+     it slid the visible region off the pinned canvas and exposed an unpainted strip.
+     #bg removes that reason entirely: the field is a scrolling element now, so it
+     bounces with the page and the strip shows the field. Suppressing the bounce was
+     also most of why the page did not feel like it scrolled. */
   /* the ONLY thing that scrolls — an invisible spacer that generates progress.
-     everything visible is pinned and morphs in place. */
+     everything visible is pinned and morphs in place. Deleting this rule makes
+     scrollTarget()'s `max` negative, so progress clamps to 0 and the states never
+     advance while everything still renders perfectly. */
   #scroll{ height:560vh; }
-  /* THE pinned viewport box. Everything visible lives inside it and is positioned
-     ABSOLUTELY against it, so there is exactly ONE height reference on the page.
-     This is not tidiness — it is the fix for the iOS drift. iOS has three
-     different "viewport heights" and they are all different numbers at once
-     (measured on device: 100vh = 786, documentElement.clientHeight = 746,
-     innerHeight = 677..786 live). The glass buffer is sized from clientHeight and
-     the glass cells are derived from DOM rects, which are also in clientHeight
-     space — but #gl's CSS box used 100vh, so the render was stretched 786/746
-     (+5.4%) into its box and its centre sat 20px below the text's. Anything
-     anchored to the viewport must resolve against this one box; adding a new
-     `position:fixed` element re-opens the bug. --vph is set from clientHeight in
-     resize(); the 100vh fallback only matters before the first resize() call. */
-  #vp{ position:fixed; top:0; left:0; width:100vw; height:var(--vph,100vh); pointer-events:none; }
-  #gl{ position:absolute; inset:0; width:100%; height:100%; display:block; z-index:0; }
+  /* Safari keeps two bands for itself — a status-bar band and a toolbar band — and
+     a position:fixed element is CLIPPED at those insets, so the glass canvas can
+     never paint into them. An element that SCROLLS reaches them fine, which is why
+     #bg is absolute rather than fixed and why it, not this background-color, fills
+     them almost all of the time.
+     background-color still matters in one case: at the very top of the page #bg is
+     clamped to the document origin (nothing paints above it), so the status-bar band
+     falls back to this. --bg-edge is the field's own colour at its vertical edge,
+     read off the rendered pixels rather than derived, so the fallback matches.
+     Use the background-COLOR longhand, never the `background` shorthand — the
+     shorthand resets background-color, and that value is the one Safari samples. */
+  html{ margin:0; background-color:var(--bg-edge); }
+  body{ margin:0; background:transparent; color:var(--ink); font-family:var(--sans);
+    overflow-x:hidden; }
+  #bg{ position:absolute; left:0; width:100vw; display:block; z-index:0; }
+  /* #gl — the glass. FIXED, so the compositor pins it exactly like .frame, which is
+     what stopped it bouncing. Transparent except for the glass and its shadow. */
+  #gl{ position:fixed; left:0; top:0; width:100vw; height:100vh; height:100lvh;
+    display:block; z-index:1; }
+
+  /* #chrome — the BEZEL, sized to the live VISIBLE area from visualViewport, so
+     the frame, ticks and readout hug the Safari toolbar as it grows and shrinks.
+     JS writes its box (see syncChrome); the CSS values are only the pre-JS state.
+     This is deliberately NOT pinned like #vp: the bezel should track the window,
+     the TEXT should not move. Two different jobs, two different boxes. */
+  #chrome{ position:fixed; top:0; left:0; width:100vw; height:var(--vph,100vh);
+    pointer-events:none; z-index:3; }
+
+  /* #vp — the RIGID text box: layout viewport minus the safe area. Stays put
+     through the whole toolbar animation, which is the drift fix. */
+  #vp{ position:fixed; pointer-events:none; z-index:2;
+    top:env(safe-area-inset-top,0px);
+    left:env(safe-area-inset-left,0px);
+    width:calc(100vw - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px));
+    height:calc(var(--vph,100vh) - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)); }
+
+  /* probe: the only way to read env(safe-area-inset-*) back out in JS */
+  #sa{ position:fixed; top:0; left:0; width:0; height:0; visibility:hidden; pointer-events:none;
+    padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px)
+            env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); }
 
   .frame{ position:absolute; inset:24px; border:1px solid var(--line); border-radius:2px; pointer-events:none; z-index:2; }
   .tick{ position:absolute; width:15px; height:15px; pointer-events:none; z-index:2; }
@@ -123,15 +157,55 @@
   }
   @media (prefers-reduced-motion: reduce){ #scroll{height:auto} }
 </style>
+<script type="x-shader/x-chunk" id="fieldsrc">
+// TWO coordinate spaces, and the split is load-bearing now that the field scrolls:
+//   q  = PATTERN space — scrolled. Only the repeating geometry uses it (the 9-grid
+//        lines and the 13-cell dot lattice), so the texture travels with the page.
+//   sp = SCREEN space — NOT scrolled. The vignette, the per-dot edge fade and the
+//        cursor glow use it, because they are properties of where a thing is on the
+//        SCREEN, not of which dot it is. Feeding them q instead would scroll the
+//        vignette off the page and — worse — make `fade` grow without bound, so
+//        every dot would dim to nothing a few hundred px into the scroll.
+vec3 field(vec2 q, vec2 m, vec2 sp){
+  float px = 2.0/uRefH;
+  vec3 col = vec3(0.019,0.025,0.035);
+  col += 0.040*vec3(0.10,0.24,0.32)*(0.6-0.5*length(sp*vec2(0.72,1.0)));
+  float gs=9.0; vec2 gd=abs(fract(q*gs-0.5)-0.5); float gw=gs*px;
+  col += (1.0-min(min(gd.x/gw,gd.y/gw),1.0))*vec3(0.16,0.34,0.42)*0.05;
+  float ds=13.0; vec2 dcell=fract(q*ds)-0.5; vec2 dctr=(floor(q*ds)+0.5)/ds;
+  vec2 dctrS=dctr+(sp-q);   // the SAME dot, expressed on screen
+  float fade=smoothstep(1.5,0.25,length(dctrS*vec2(0.82,1.0)));
+  float dm=distance(dctrS,m); float infl=smoothstep(0.62,0.0,dm); infl*=infl;
+  float r=0.10+0.36*infl; float dpix=ds*px;
+  float dotm=smoothstep(dpix,-dpix,length(dcell)-r)*fade;
+  col += dotm*mix(vec3(0.16,0.42,0.54),vec3(0.42,0.80,0.95),infl)*(0.12+0.78*infl);
+  float gb=length(sp-m); col += exp(-gb*gb/0.10)*vec3(0.08,0.34,0.40)*0.22;
+  return col;
+}
+</script>
 </head>
 <body>
 <div id="scroll"></div>
-<div id="vp">
-<canvas id="gl"></canvas>
+<canvas id="bg"></canvas><!-- the dot field: SCROLLS, so it reaches Safari's bands -->
+<canvas id="gl"></canvas><!-- the glass: position:fixed, transparent elsewhere -->
+<div id="sa"></div><!-- safe-area probe -->
+<div id="chrome"><!-- bezel: tracks the VISIBLE area, follows the Safari bar -->
 <div class="frame"></div>
 <div class="tick tl"></div><div class="tick tr"></div><div class="tick bl"></div><div class="tick br"></div>
 <div class="nameplate"><span class="led"></span>Frank Tinsley · Optical bench</div>
+<div class="hint" id="hint">scroll ↓</div>
+<div class="readout" id="readout">
+  <div class="cell"><span class="k">RES</span> <span class="v" id="r_res">—</span></div>
+  <div class="cell"><span class="k">FPS</span> <span class="v acc" id="r_fps">—</span></div>
+  <div class="cell"><span class="k">STATE</span> <span class="v" id="r_state">01 / 05</span></div>
+  <div class="cell"><span class="k">VIEW</span> <span class="v acc" id="r_dbg">render</span> <span class="k">(n)</span></div>
+  <span class="spacer"></span>
+  <div class="cell opt"><span class="k">SDF</span> <span class="v">6-cell · smin</span></div>
+  <div class="cell opt"><span class="k">CUR</span> <span class="v" id="r_cur">x +0.00 y +0.00</span></div>
+</div>
+</div><!-- /#chrome -->
 
+<div id="vp"><!-- text: rigid, does not move with the toolbar -->
 <div class="stage">
   <!-- 0 Identity -->
   <section class="state" data-state="0">
@@ -187,17 +261,31 @@
   </section>
 </div>
 
-<div class="hint" id="hint">scroll ↓</div>
-<div class="readout" id="readout">
-  <div class="cell"><span class="k">RES</span> <span class="v" id="r_res">—</span></div>
-  <div class="cell"><span class="k">FPS</span> <span class="v acc" id="r_fps">—</span></div>
-  <div class="cell"><span class="k">STATE</span> <span class="v" id="r_state">01 / 05</span></div>
-  <div class="cell"><span class="k">VIEW</span> <span class="v acc" id="r_dbg">render</span> <span class="k">(n)</span></div>
-  <span class="spacer"></span>
-  <div class="cell opt"><span class="k">SDF</span> <span class="v">6-cell · smin</span></div>
-  <div class="cell opt"><span class="k">CUR</span> <span class="v" id="r_cur">x +0.00 y +0.00</span></div>
-</div>
 </div><!-- /#vp -->
+
+<script type="x-shader/x-fragment" id="bgfrag">#version 300 es
+precision highp float;
+uniform vec2  uSpOff;      // maps THIS canvas's gl_FragCoord into shared screen space
+uniform float uRefH;       // the shared scale: 1 device px = 2/uRefH in field units
+uniform float uScroll;     // document scroll, field units
+uniform vec2  uSwellN;     // reactive-glow focal, already in screen-space units
+uniform float uTime;
+out vec4 frag;
+float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+//__FIELD__
+void main(){
+  // sp is SCREEN space and q is DOCUMENT space, in the same units the glass canvas
+  // uses — that shared definition is what keeps the two canvases showing one field
+  // rather than two similar ones. uSpOff carries this canvas's offset from the
+  // viewport, so the vignette/edge-fade/glow stay anchored to the SCREEN while the
+  // dot lattice stays anchored to the DOCUMENT and scrolls.
+  vec2 sp = (gl_FragCoord.xy + uSpOff) * (2.0/uRefH);
+  vec2 q  = sp - vec2(0.0, uScroll);
+  vec3 col = field(q, uSwellN, sp);
+  col += (hash21(gl_FragCoord.xy+uTime)-0.5)*0.010;
+  frag = vec4(pow(clamp(col,0.0,1.0),vec3(0.95)),1.0);
+}
+</script>
 
 <script type="x-shader/x-fragment" id="frag">#version 300 es
 precision highp float;
@@ -208,6 +296,9 @@ uniform float uTime;
 uniform vec4  uCells[6];   // xy = center, zw = half-size (y-normalized units)
 uniform float uCorner;
 uniform float uK;          // smin blend radius
+uniform float uScroll;     // dot-field scroll offset, p-units (see SCROLL_K)
+uniform float uRefH;       // reference height (device px) — the FIELD's scale,
+                           // shared with the background canvas so one dot is one size
 uniform vec2  uPar;        // glass parallax offset — the DOM text gets the same
 uniform vec2  uSwell;      // reactive-glow focal point (floats on idle)
 uniform vec3  uLight;      // key-light direction
@@ -287,21 +378,7 @@ float profH(float dd, float rimA, float TH){
 }
 
 // cursor-reactive field the glass refracts
-vec3 field(vec2 p, vec2 m){
-  float px = 2.0/uRes.y;
-  vec3 col = vec3(0.019,0.025,0.035);
-  col += 0.040*vec3(0.10,0.24,0.32)*(0.6-0.5*length(p*vec2(0.72,1.0)));
-  float gs=9.0; vec2 gd=abs(fract(p*gs-0.5)-0.5); float gw=gs*px;
-  col += (1.0-min(min(gd.x/gw,gd.y/gw),1.0))*vec3(0.16,0.34,0.42)*0.05;
-  float ds=13.0; vec2 dcell=fract(p*ds)-0.5; vec2 dctr=(floor(p*ds)+0.5)/ds;
-  float fade=smoothstep(1.5,0.25,length(dctr*vec2(0.82,1.0)));
-  float dm=distance(dctr,m); float infl=smoothstep(0.62,0.0,dm); infl*=infl;
-  float r=0.10+0.36*infl; float dpix=ds*px;
-  float dotm=smoothstep(dpix,-dpix,length(dcell)-r)*fade;
-  col += dotm*mix(vec3(0.16,0.42,0.54),vec3(0.42,0.80,0.95),infl)*(0.12+0.78*infl);
-  float gb=length(p-m); col += exp(-gb*gb/0.10)*vec3(0.08,0.34,0.40)*0.22;
-  return col;
-}
+//__FIELD__
 
 void main(){
   vec2 p  = (2.0*gl_FragCoord.xy-uRes)/uRes.y;
@@ -318,10 +395,19 @@ void main(){
   vec2  gf = glassField(p - par, gcell);
   float d = gf.x;
 
-  vec3 base = field(p - parF, ss);   // ss floats on idle -> glow drifts behind glass
-  base *= 1.0 - 0.28*smoothstep(0.06,0.0,d)*step(0.0,d);
+  vec2 spB = p - parF;                       // screen-space sample point
+  vec2 off = vec2(0.0, uScroll);             // pattern lags/leads by the scroll
+  // The FIELD is no longer drawn here — the scrolling background canvas owns it.
+  // This canvas is transparent except for the glass and its contact shadow, so the
+  // only reason to evaluate the field outside the glass is the debug views.
+  vec3 base = vec3(0.0);
+  if (uDbg > 0.5){
+    base = field(spB - off, ss, spB);        // ss floats on idle -> glow drifts behind glass
+    base *= 1.0 - 0.28*smoothstep(0.06,0.0,d)*step(0.0,d);
+  }
 
   vec3 col = base;
+  vec3 glassOut = vec3(0.0);   // glass colour, needed after the block for the alpha output
   float aa = fwidth(d);
   float inside = smoothstep(aa,-aa,d);
 
@@ -376,7 +462,8 @@ void main(){
     vec3 refr = vec3(0.0);
     for(int i=0;i<8;i++){
       float fi=float(i); float rr=sqrt((fi+0.5)/8.0)*blurR; float ang=fi*GA+ja;
-      refr += field(sampleP - parF + vec2(cos(ang),sin(ang))*rr, ss);
+      vec2 spR = sampleP - parF + vec2(cos(ang),sin(ang))*rr;
+      refr += field(spR - vec2(0.0,uScroll), ss, spR);
     }
     refr/=8.0;
     refr = mix(refr, refr*vec3(0.88,0.98,1.07)+0.014, 0.5);
@@ -409,6 +496,7 @@ void main(){
     glass += fres*vec3(0.28,0.72,0.82)*0.5;
     glass += spec*vec3(0.82,0.94,1.0)*0.55;
     glass += rimLine*vec3(0.32,0.80,0.90)*(0.32+0.5*fres);
+    glassOut = glass;
     col = mix(base, glass, inside);
     if (uDbg > 0.5) col = mix(base, n*0.5+0.5, inside);              // normal
     if (uDbg > 1.5) col = mix(base, vec3(rimP, zf/max(0.72*mn,1e-4), 0.0), inside); // rimP / height
@@ -416,14 +504,40 @@ void main(){
     if (uDbg > 3.5) col = mix(base, refr, inside);                   // refraction only
     if (uDbg > 4.5) col = mix(base, vec3(fres), inside);             // fresnel only
   }
-  col += (hash21(gl_FragCoord.xy+uTime)-0.5)*0.010;
-  frag = vec4(pow(clamp(col,0.0,1.0),vec3(0.95)),1.0);
+  // ---- ALPHA OUTPUT ------------------------------------------------------
+  // This canvas is now an OVERLAY on the scrolling background canvas, so it must
+  // composite rather than replace. Two contributions:
+  //   inside the glass -> the glass colour, opaque (coverage-antialiased at the rim)
+  //   outside it       -> the contact shadow, which was a MULTIPLY on the field and
+  //                       becomes black-with-alpha, exactly equivalent under
+  //                       src-alpha blending: dst*(1-a) == dst*shadowFactor.
+  // The 0.95 gamma is applied to the shadow FACTOR too, because the old code gamma'd
+  // the product (pow(base*k) == pow(base)*pow(k)); dropping that would lighten every
+  // shadow slightly.
+  float shk = pow(1.0 - 0.28*smoothstep(0.06,0.0,d)*step(0.0,d), 0.95);
+  float a   = inside + (1.0-shk)*(1.0-inside);
+  if (uDbg > 0.5){   // inspection views stay opaque so they read like they always did
+    col += (hash21(gl_FragCoord.xy+uTime)-0.5)*0.010;
+    frag = vec4(pow(clamp(col,0.0,1.0),vec3(0.95)),1.0);
+    return;
+  }
+  vec3 gcol = pow(clamp(glassOut,0.0,1.0),vec3(0.95));
+  gcol += (hash21(gl_FragCoord.xy+uTime)-0.5)*0.010;
+  // un-premultiply: the blend below multiplies by `a` again
+  frag = vec4(a > 1e-4 ? gcol*inside/a : vec3(0.0), a);
 }
 </script>
 
 <script>
 const canvas=document.getElementById('gl');
-const gl=canvas.getContext('webgl2',{antialias:false,alpha:false});
+// The canvas's own measured rect — the single source for the drawing buffer, the
+// cell mapping (Rr) and the pointer mapping. Declared HERE, beside the element,
+// because buildStates() is called at top level further down and would hit the
+// temporal dead zone if this lived next to resize(). Refreshed in resize().
+let GLR=canvas.getBoundingClientRect();
+// alpha:true — this canvas is an OVERLAY on #bg now, not the whole picture.
+// premultipliedAlpha:false because the shader un-premultiplies (see its alpha output).
+const gl=canvas.getContext('webgl2',{antialias:false,alpha:true,premultipliedAlpha:false});
 const RO=document.getElementById('readout');
 function fail(m){ RO.innerHTML='<span class="err">'+m+'</span>'; }
 if(!gl){ fail('WebGL2 unavailable'); throw new Error('no webgl2'); }
@@ -433,12 +547,89 @@ function sh(t,s){ const o=gl.createShader(t); gl.shaderSource(o,s); gl.compileSh
   if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)){ fail(gl.getShaderInfoLog(o)); throw new Error(gl.getShaderInfoLog(o)); } return o; }
 const prog=gl.createProgram();
 gl.attachShader(prog,sh(gl.VERTEX_SHADER,VERT));
-gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,document.getElementById('frag').textContent));
+// Both programs splice in ONE field() definition. Two copies of that function would
+// drift apart on the next edit, and a drift is a visible seam between the canvases.
+const FIELD_SRC=document.getElementById('fieldsrc').textContent;
+const withField=id=>document.getElementById(id).textContent.replace('//__FIELD__',FIELD_SRC);
+gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,withField('frag')));
 gl.linkProgram(prog);
 if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ fail(gl.getProgramInfoLog(prog)); throw new Error('link'); }
 gl.useProgram(prog);
 const U=n=>gl.getUniformLocation(prog,n);
-const uRes=U('uRes'),uMouse=U('uMouse'),uMouseS=U('uMouseS'),uTime=U('uTime'),uCells=U('uCells[0]'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg');
+const uRes=U('uRes'),uMouse=U('uMouse'),uMouseS=U('uMouseS'),uTime=U('uTime'),uCells=U('uCells[0]'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg');
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+// ---- the BACKGROUND canvas -------------------------------------------------
+// Why two canvases at all: a position:fixed element is CLIPPED at Safari's obscured
+// insets and can never paint into the status-bar / toolbar bands, while an element
+// that scrolls reaches them fine. But anything pinned by JS instead of by
+// position:fixed bounces during momentum scroll, because scrolling runs on the
+// compositor and JS does not. So each layer gets the positioning it actually needs:
+//   #bg  scrolls with the document (compositor) -> reaches both bands, never lags
+//   #gl  position:fixed (compositor)            -> never bounces
+// Neither one depends on JS for its position, which is the whole point.
+// How fast the dot field travels against the page. 1.0 = it moves exactly with the
+// document, like the content of any ordinary page — which is the point: the field is
+// the only thing that moves now, so it is what makes the page read as scrolling.
+// Both canvases key off this same constant, so they cannot disagree.
+const SCROLL_K = 1.0;
+
+const bgCanvas=document.getElementById('bg');
+const bgl=bgCanvas.getContext('webgl2',{antialias:false,alpha:false});
+let bgProg=null,bU={};
+if(bgl){
+  const bsh=(t,src)=>{ const o=bgl.createShader(t); bgl.shaderSource(o,src); bgl.compileShader(o);
+    if(!bgl.getShaderParameter(o,bgl.COMPILE_STATUS)){ fail(bgl.getShaderInfoLog(o)); throw new Error(bgl.getShaderInfoLog(o)); } return o; };
+  bgProg=bgl.createProgram();
+  bgl.attachShader(bgProg,bsh(bgl.VERTEX_SHADER,VERT));
+  bgl.attachShader(bgProg,bsh(bgl.FRAGMENT_SHADER,withField('bgfrag')));
+  bgl.linkProgram(bgProg);
+  if(!bgl.getProgramParameter(bgProg,bgl.LINK_STATUS)){ fail(bgl.getProgramInfoLog(bgProg)); throw new Error('bg link'); }
+  bgl.useProgram(bgProg);
+  ['uSpOff','uRefH','uScroll','uSwellN','uTime'].forEach(n=>{ bU[n]=bgl.getUniformLocation(bgProg,n); });
+}
+// How far #bg overhangs the viewport top and bottom. It has to cover both bands plus
+// however far the page can scroll between repositions; the reposition itself is
+// invisible because the field is computed in DOCUMENT space, so a stale position
+// costs coverage, never correctness.
+const BG_M=200;
+let bgDocTop=0;
+function layoutBg(){
+  if(!bgl) return;
+  const vh=vpH(), cssH=vh+2*BG_M;
+  // clamp at 0: nothing paints above the document origin, so at the very top of the
+  // page the status-bar band falls back to the page background-color.
+  // Clamp to the DOCUMENT. #bg is absolutely positioned, so it contributes to the
+  // scrollable overflow area — left unclamped it pushes the page's bottom down as it
+  // follows the scroll, and the page grows forever as you chase it.
+  // The cost of clamping is that the outermost ~200px at each end of the document
+  // fall back to background-color in the bands, which is also the case at scroll 0.
+  const docH=document.getElementById('scroll').offsetHeight;
+  bgDocTop=Math.max(0, Math.min(Math.round(scrollY-BG_M), Math.max(0, docH-cssH)));
+  bgCanvas.style.top=bgDocTop+'px';
+  bgCanvas.style.height=cssH+'px';
+  const w=Math.round(innerWidth*dpr), h=Math.round(cssH*dpr);
+  if(bgCanvas.width!==w||bgCanvas.height!==h){ bgCanvas.width=w; bgCanvas.height=h; }
+}
+function drawBg(now){
+  if(!bgl||!bgProg) return;
+  layoutBg();
+  const r=bgCanvas.getBoundingClientRect();
+  bgl.viewport(0,0,bgCanvas.width,bgCanvas.height);
+  bgl.useProgram(bgProg);
+  // sp = (gl_FragCoord + uSpOff) * 2/uRefH, with uSpOff carrying this canvas's
+  // position relative to the viewport centre. Derived once here so the shader stays
+  // identical in form to the glass canvas's own screen-space mapping.
+  bgl.uniform2f(bU.uSpOff, r.left*dpr - (innerWidth*dpr)/2,
+                           (vpH()*dpr)/2 - r.top*dpr - bgCanvas.height);
+  bgl.uniform1f(bU.uRefH, H||1);
+  bgl.uniform1f(bU.uScroll, GLR.height>0 ? 2.0*scrollY*SCROLL_K/GLR.height : 0.0);
+  bgl.uniform2f(bU.uSwellN, (2*wx-W)/(H||1), (2*wy-H)/(H||1));
+  bgl.uniform1f(bU.uTime, now*0.001);
+  bgl.drawArrays(bgl.TRIANGLES,0,3);
+}
+
 const stage=document.querySelector('.stage');
 
 // ---- morph states DERIVED FROM the DOM content: measure where each state's
@@ -448,9 +639,15 @@ const stage=document.querySelector('.stage');
 const secs=[...document.querySelectorAll('.state')];
 const N=secs.length;
 function Rr(r, px, py){
-  const iw=innerWidth, ih=document.documentElement.clientHeight;   // layout vp, see resize()
-  return [ (2*(r.left+r.width/2)-iw)/ih, 1-2*(r.top+r.height/2)/ih,
-           (r.width/2+px)*2/ih, (r.height/2+py)*2/ih ];
+  // Map a DOM rect into the CANVAS's y-normalized space — relative to the canvas
+  // rect, NOT to any viewport constant. The text lives in #vp (the safe box) and
+  // the canvas covers the whole screen, so the two boxes differ by the safe-area
+  // inset; both rects come from getBoundingClientRect and therefore share one
+  // coordinate system, which makes this mapping exact rather than approximate.
+  // Using a viewport constant here instead is precisely what caused the drift.
+  const c=GLR, ch=c.height||1;
+  return [ (2*(r.left+r.width/2-c.left)-c.width)/ch, 1-2*(r.top+r.height/2-c.top)/ch,
+           (r.width/2+px)*2/ch, (r.height/2+py)*2/ch ];
 }
 function R(el, px, py){ return Rr(el.getBoundingClientRect(), px, py); }
 // the INKED box of an element's text, not its block box — a centred one-line
@@ -492,7 +689,7 @@ function buildStates(){
   // sitting closer to the rim than that rides the rounded shoulder rather than
   // the flat interior — which is exactly what made the eyebrow labels look stuck
   // to the top edge. Scale the vertical pad with it so it holds at any viewport.
-  const BEV = 0.05*document.documentElement.clientHeight/2;   // must track bevR in the shader
+  const BEV = 0.05*GLR.height/2;   // must track bevR in the shader; canvas-relative like the cells
   const clear = v => Math.max(v, BEV + (mob?6:12));
   const items=[...secs[2].querySelectorAll('.grid .cell')].map(el=>R(el, mob?13:15, mob?8:15));
   const rows =[...secs[3].querySelectorAll('.rows .row')].map(el=>R(el, mob?12:14, mob?5:9));
@@ -531,7 +728,10 @@ const hint=document.getElementById('hint');
 const r_state=document.getElementById('r_state');
 let morphAmt=0;   // 0 at a settled state, 1 mid-transition — drives the goo bump
 function scrollTarget(){
-  const max=document.getElementById('scroll').offsetHeight - innerHeight;
+  // vpH(), not innerHeight: innerHeight moves with the toolbar, so dividing by it
+  // made scroll PROGRESS wobble as the bar animated — the morph amount and every
+  // state's settle point drifted with it. Same class of bug as the layer drift.
+  const max=document.getElementById('scroll').offsetHeight - vpH();
   const p=Math.min(Math.max((scrollY)/(max||1),0),1);
   const s=p*(N-1);
   const i=Math.min(Math.floor(s),N-2);
@@ -553,21 +753,67 @@ function scrollTarget(){
 
 let W=0,H=0,dpr=1;
 const r_res=document.getElementById('r_res'),r_fps=document.getElementById('r_fps'),r_cur=document.getElementById('r_cur');
-// Vertical reference is the LAYOUT viewport (documentElement.clientHeight), NOT
-// innerHeight. On iOS innerHeight is the VISUAL viewport — it shrinks and grows as
-// the Safari toolbar animates — while the CSS boxes here (#gl height:100vh, .stage
-// inset:0) are sized by the LAYOUT viewport, which stays put. Sizing the WebGL buffer
-// (and normalising the DOM rects in R()) by innerHeight stretched the glass into the
-// 100vh box by a factor that changed as the toolbar moved, so it drifted vertically
-// against the pinned DOM text on every scroll. clientHeight matches the CSS boxes and
-// is stable across the toolbar animation, so the two layers stay locked. Width keeps
-// innerWidth (= 100vw; clientWidth would drop the desktop scrollbar and mismatch).
+// vpH() is the LAYOUT viewport: the one height iOS keeps STABLE while the toolbar
+// animates (innerHeight is the visual viewport and moves; 100vh is the large
+// viewport and is a third value). It sizes the FOREGROUND box #vp and the scroll
+// progress divisor — everything that must not move under the user.
+//
+// It does NOT size the canvas. GLR is the canvas's own measured rect, and the
+// drawing buffer, the cell mapping (Rr) and the pointer mapping all derive from
+// it, so the render can never be stretched into a box of a different size — that
+// mismatch WAS the iOS drift. Measure the layer; don't assume a constant matches it.
 const vpH = () => document.documentElement.clientHeight;
-function resize(){ dpr=Math.min(window.devicePixelRatio||1,2); W=Math.floor(innerWidth*dpr); H=Math.floor(vpH()*dpr);
-  // Drive the pinned box from the SAME source as the drawing buffer, so the CSS
-  // box and the render cannot disagree — see #vp. Written on every resize because
-  // on iOS the toolbar animation fires resize even though clientHeight is stable.
+
+// --- the BEZEL tracks the live visible area -------------------------------
+// #chrome is sized from visualViewport, so the frame/ticks/readout hug the
+// Safari toolbar as it grows and shrinks, insetting further for the safe area so
+// nothing lands under a notch or the home indicator. The text box (#vp) is
+// deliberately NOT driven from here: it must stay rigid, or the drift is back.
+const chromeEl=document.getElementById('chrome'), saEl=document.getElementById('sa');
+let SA={t:0,r:0,b:0,l:0};
+function readSafeArea(){
+  // env() is not readable directly; #sa turns the insets into padding we can read.
+  const c=getComputedStyle(saEl), n=v=>parseFloat(v)||0;
+  return {t:n(c.paddingTop), r:n(c.paddingRight), b:n(c.paddingBottom), l:n(c.paddingLeft)};
+}
+
+
+
+
+let _cb='';
+function syncChrome(){
+  const v=window.visualViewport;
+  // no visualViewport (older desktop): fall back to the stable layout box
+  const top  = (v?v.offsetTop:0)  + SA.t;
+  const left = (v?v.offsetLeft:0) + SA.l;
+  const w = (v?v.width :innerWidth) - SA.l - SA.r;
+  const h = (v?v.height:vpH())     - SA.t - SA.b;
+  // write only on change: this runs per frame and per scroll event, and an
+  // unconditional style write forces a style recalc on every one of them.
+  const key=top+'|'+left+'|'+w+'|'+h;
+  if(key===_cb) return;
+  _cb=key;
+  chromeEl.style.top=top+'px'; chromeEl.style.left=left+'px';
+  chromeEl.style.width=w+'px'; chromeEl.style.height=h+'px';
+}
+if(window.visualViewport){
+  visualViewport.addEventListener('resize',syncChrome);
+  visualViewport.addEventListener('scroll',syncChrome);
+}
+// syncBackdrop on the scroll EVENT as well as per frame. The CSS pattern is moved
+// by the compositor at 1:1 with no JS at all, while the shader's offset is
+// rAF-driven — so anywhere rAF stalls (iOS momentum scroll throttles it, and the
+// agent browser pane never ticks it at all) the compensation term would freeze
+// while the CSS half kept moving, and the two grids would visibly slide apart.
+addEventListener('scroll',syncChrome,{passive:true});
+function resize(){ dpr=Math.min(window.devicePixelRatio||1,2);
+  // Write --vph BEFORE measuring: it resizes #vp, and a stale read here would
+  // build the states against the previous layout.
   document.documentElement.style.setProperty('--vph', vpH()+'px');
+  SA=readSafeArea();
+  syncChrome();
+  GLR=canvas.getBoundingClientRect();
+  W=Math.round(GLR.width*dpr); H=Math.round(GLR.height*dpr);
   canvas.width=W; canvas.height=H; gl.viewport(0,0,W,H); r_res.textContent=`${(W*H/1e6).toFixed(1)} Mpx`; buildStates(); }
 addEventListener('resize',resize); resize();
 document.fonts && document.fonts.ready.then(buildStates);   // re-measure once text metrics settle
@@ -583,10 +829,10 @@ function moved(nx,ny){
   const marg=10*dpr;                       // minor-movement margin (~10 css px)
   if((nx-activeX)**2+(ny-activeY)**2 > marg*marg){ activeX=nx; activeY=ny; lastActive=performance.now(); }
 }
-addEventListener('pointermove',e=>{ const nx=e.clientX*dpr, ny=(vpH()-e.clientY)*dpr; moved(nx,ny); mx=nx; my=ny; },{passive:true});
+addEventListener('pointermove',e=>{ const nx=(e.clientX-GLR.left)*dpr, ny=(GLR.height-(e.clientY-GLR.top))*dpr; moved(nx,ny); mx=nx; my=ny; },{passive:true});
 // touch/tap (or mouse press): jump the focal to the touch point and go active,
 // so tapping the screen moves the reactive glow there even without a drag
-addEventListener('pointerdown',e=>{ const nx=e.clientX*dpr, ny=(vpH()-e.clientY)*dpr; activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; },{passive:true});
+addEventListener('pointerdown',e=>{ const nx=(e.clientX-GLR.left)*dpr, ny=(GLR.height-(e.clientY-GLR.top))*dpr; activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; },{passive:true});
 const sgn=v=>(v<0?'−':'+')+Math.abs(v).toFixed(2);
 
 const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -655,13 +901,24 @@ function loop(now){
   stage.style.transform=`translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px)`;
   // goo bump: add blend only mid-morph, so forms neck/flow while transitioning
   // but end up genuinely separate (k -> its small settle value) at rest
+  drawBg(now);    // the scrolling field, under everything
+  syncChrome();   // per frame: the vv events alone can lag the toolbar animation
   const kLive = cur.k + 0.085*morphAmt;
   gl.uniform2f(uRes,W,H); gl.uniform2f(uMouse,mx,my); gl.uniform2f(uMouseS,sx,sy);
+  // p is y-normalised over [-1,1], so S css px of travel is 2S/height in p-units.
+  gl.uniform1f(uScroll, GLR.height>0 ? 2.0*scrollY*SCROLL_K/GLR.height : 0.0);
+  gl.uniform1f(uRefH, H||1);   // this canvas IS the reference; #bg keys off the same value
   gl.uniform2f(uPar,parx,pary); gl.uniform2f(uSwell,wx,wy);
   gl.uniform3f(uLight, -0.42, 0.60, 0.72);
   gl.uniform1f(uDbg, window.__dbg||0);   // dev inspection hook (see tests/glass-zoom.js)
   gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive);
+  gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);   // transparent: #bg shows through
   gl.drawArrays(gl.TRIANGLES,0,3);
+  // ?edgecolor / console: sample the REAL composited edge rows. Must run here,
+  // immediately after the draw — without preserveDrawingBuffer the drawing buffer
+  // is undefined once the frame is composited, so a readPixels from outside the
+  // loop returns nothing useful. The band colour has to come from the rendered
+  // pixels, not from re-deriving the shader by hand.
   const nx=(2*mx-W)/H, ny=(2*my-H)/H; r_cur.textContent=`x ${sgn(nx)} y ${sgn(ny)}`;
   frames++; if(now-fpsT>=500){ fps=Math.round(frames*1000/(now-fpsT)); frames=0; fpsT=now; r_fps.textContent=String(fps); }
   requestAnimationFrame(loop);
@@ -676,6 +933,85 @@ requestAnimationFrame(loop);
 // up and down until the toolbar has collapsed and expanded a few times, THEN
 // screenshot once. A row whose min==max was rock solid; a row with a spread is the
 // one that moved. Tap the panel to reset the peaks.
+// ---- ?top — WHICH mechanism can paint into the status-bar band?
+// Google demonstrably renders page content up there (video thumbnails visible
+// above the status bar), so the band is NOT untouchable — but our fixed layers
+// never reach it. Rather than theorise about why, test the three candidates at
+// once, split across the width so a single screenshot names the winner:
+//   LEFT  half, MAGENTA = an ABSOLUTE (in-flow, non-fixed) element with negative
+//                top. If this shows, the fix is to draw the dot layer un-pinned.
+//   RIGHT half, GREEN   = the same element but position:FIXED. Expected to be
+//                clipped at the inset; if it shows, pinning was never the problem.
+//   BLUE                = neither reached, and only background-COLOR fills the
+//                band -> a flat colour really is the ceiling for the top.
+//   BLACK               = not even background-color applied; probe is broken.
+if(/(^|[?&])top($|[=&])/.test(location.search)){
+  document.documentElement.style.backgroundColor='#00f';
+  document.documentElement.style.backgroundImage='none';
+  document.body.style.background='transparent';
+  const mk=(pos,color,side)=>{
+    const d=document.createElement('div');
+    d.style.cssText='position:'+pos+';top:-300px;height:600px;width:50%;z-index:-1;'+
+      'pointer-events:none;background:'+color+';'+(side==='l'?'left:0;':'right:0;');
+    document.body.appendChild(d); return d;
+  };
+  mk('absolute','#f0f','l');
+  const fx=mk('fixed','#0f0','r');
+  // keep the absolute one visually stationary the way a real implementation would
+  const abs=document.body.lastElementChild.previousElementSibling;
+  (function t(){ requestAnimationFrame(t); })();
+  void fx; void abs;
+}
+
+// ---- ?edge — settles "can the page paint into the safe area / Safari chrome?"
+// empirically, in ONE screenshot, without trusting anyone's memory of iOS.
+// It paints the PAGE background magenta and outlines each layer's true rect:
+//   lime  = #gl   (the canvas: where the dot field can actually render)
+//   cyan  = #vp   (the rigid text box)
+//   amber = #chrome (the bezel, tracking the visible area)
+// Read it like this:
+//   magenta visible in the status-bar / toolbar band -> those bands are TINTED from
+//     the page background. Content cannot render there, but the COLOR is ours, so
+//     the fix is a colour match (theme-color / background-color), not geometry.
+//   band stays black -> it is pure browser chrome, untouchable by the page at all.
+//   lime edge sitting inside the band -> the canvas is the thing falling short and
+//     the fix IS geometry.
+// Whichever it is, the answer is in the picture rather than in an assumption.
+if(/(^|[?&])edge($|[=&])/.test(location.search)){
+  // STRIPES, not a flat colour. A flat magenta proved the bands take the page's
+  // background COLOUR — but that is equally consistent with two very different
+  // mechanisms, which need opposite fixes:
+  //   (a) real CSS background propagation paints the canvas surface under the
+  //       chrome -> a background-IMAGE paints there too -> the dot field can be
+  //       continued into the bands with a CSS gradient.
+  //   (b) Safari merely SAMPLES background-color and tints its chrome with a solid
+  //       fill -> no image ever appears there -> a flat colour match is the ceiling.
+  // Horizontal stripes tell them apart in one look: stripes in the band means (a),
+  // a flat colour means (b).
+  const STRIPES='repeating-linear-gradient(180deg,#f0f 0 24px,#0a0 24px 48px)';
+  document.documentElement.style.background=STRIPES;
+  document.body.style.background='transparent';
+  // Each outline gets its own inset and stroke style. On desktop all three rects
+  // are IDENTICAL, so drawn flush they would hide each other and a coincidence
+  // would read as a missing layer — the inset makes all three legible whether they
+  // agree or not, which is the whole point of a probe.
+  const outline=(color,ref,label,inset,style)=>{
+    const d=document.createElement('div');
+    d.style.cssText='position:fixed;z-index:9998;pointer-events:none;border:2px '+style+' '+color+';';
+    const t=document.createElement('span');
+    t.textContent=label;
+    t.style.cssText='position:absolute;left:2px;top:2px;font:700 11px/1 var(--mono);color:'+color+';background:#000a;padding:1px 3px;white-space:nowrap;';
+    d.appendChild(t); document.body.appendChild(d);
+    return ()=>{ const r=ref.getBoundingClientRect();
+      d.style.left=(r.left+inset)+'px'; d.style.top=(r.top+inset)+'px';
+      d.style.width=Math.max(0,r.width-inset*2)+'px'; d.style.height=Math.max(0,r.height-inset*2)+'px'; };
+  };
+  const ups=[ outline('#0f0',canvas,'gl (canvas)',0,'solid'),
+              outline('#0ff',document.getElementById('vp'),'vp (text)',7,'dashed'),
+              outline('#fb0',chromeEl,'chrome (bezel)',14,'dotted') ];
+  (function tick(){ ups.forEach(f=>f()); requestAnimationFrame(tick); })();
+}
+
 if(/(^|[?&])diag($|[=&])/.test(location.search)){
   const el=document.getElementById('gl'), st=document.querySelector('.stage');
   const panel=document.createElement('div');
@@ -683,28 +1019,48 @@ if(/(^|[?&])diag($|[=&])/.test(location.search)){
     'background:rgba(0,0,0,.86);color:#9fe;font:10px/1.35 var(--mono);'+
     'padding:5px 6px;white-space:pre;overflow-x:auto;-webkit-user-select:none;user-select:none;';
   document.body.appendChild(panel);
-  // name -> live value. The last three are DERIVED and are the actual verdict:
-  // if dTop/dHgt hold still while the text visibly drifts, the CSS boxes are
-  // locked and the divergence is downstream (compositing/visual scaling), not in
-  // the geometry — which would rule out every remaining "pin the boxes" fix.
+  // name -> live value. The DERIVED rows at the bottom are the verdict; a spread
+  // of 0.00 on those is what "correct" looks like, whatever the raw rows do.
+  const vpEl=document.getElementById('vp');
   const rows=[
     ['innerH',   ()=>innerHeight],
     ['clientH',  ()=>document.documentElement.clientHeight],
     ['vv.h',     ()=>visualViewport?visualViewport.height:NaN],
     ['vv.top',   ()=>visualViewport?visualViewport.offsetTop:NaN],
-    ['vv.page',  ()=>visualViewport?visualViewport.pageTop:NaN],
     ['vv.scale', ()=>visualViewport?visualViewport.scale:NaN],
+    ['screen.h', ()=>screen.height],          // does the canvas actually reach the bezel?
     ['scrollY',  ()=>scrollY],
-    ['vp.hgt',   ()=>document.getElementById('vp').getBoundingClientRect().height],
+    ['vp.top',   ()=>vpEl.getBoundingClientRect().top],     // = safe-area inset top
+    ['vp.hgt',   ()=>vpEl.getBoundingClientRect().height],
     ['gl.top',   ()=>el.getBoundingClientRect().top],
     ['gl.hgt',   ()=>el.getBoundingClientRect().height],
     ['st.top',   ()=>st.getBoundingClientRect().top],
     ['st.hgt',   ()=>st.getBoundingClientRect().height],
     ['bufH/dpr', ()=>H/dpr],                                        // drawing buffer in css px
     ['bldH',     ()=>builtH],                                       // clientH at last buildStates()
-    ['dTop',     ()=>st.getBoundingClientRect().top-el.getBoundingClientRect().top],
-    ['dHgt',     ()=>st.getBoundingClientRect().height-el.getBoundingClientRect().height],
+    // --- invariants: all four MUST hold spread 0.00 ---
     ['dBuf',     ()=>el.getBoundingClientRect().height-H/dpr],      // css box vs drawing buffer
+    // GLR is cached at resize() and the cells are baked against it. If the canvas
+    // rect can move WITHOUT a resize firing, every cell is silently stale and the
+    // glass drifts off the text again — by a different route than last time.
+    ['staleT',   ()=>el.getBoundingClientRect().top-GLR.top],
+    ['staleH',   ()=>el.getBoundingClientRect().height-GLR.height],
+    // foreground rigidity: the safe box must not breathe with the toolbar
+    ['dVpTop',   ()=>st.getBoundingClientRect().top-vpEl.getBoundingClientRect().top],
+    ['dVpHgt',   ()=>st.getBoundingClientRect().height-vpEl.getBoundingClientRect().height],
+    // COVERAGE: is the canvas actually under every visible pixel? The visible
+    // region slides against the layout viewport during rubber-band overscroll, so
+    // a canvas pinned at top:0 can leave an unpainted strip. Both must stay >= 0;
+    // their MIN is the real margin, and a negative min is a visible gap.
+    ['coverTop', ()=>(visualViewport?visualViewport.offsetTop:0)-el.getBoundingClientRect().top],
+    ['coverBot', ()=>el.getBoundingClientRect().bottom-((visualViewport?visualViewport.offsetTop+visualViewport.height:innerHeight))],
+    ['sa.top',   ()=>SA.t],
+    ['sa.bot',   ()=>SA.b],
+    ['chr.top',  ()=>chromeEl.getBoundingClientRect().top],
+    ['chr.hgt',  ()=>chromeEl.getBoundingClientRect().height],
+    // the bezel SHOULD track the toolbar: expect a spread here, unlike everything
+    // else. chr.hgt tracking vv.h is the feature working.
+    ['chr-vv.h', ()=>chromeEl.getBoundingClientRect().height-((visualViewport?visualViewport.height:innerHeight)-SA.t-SA.b)]
   ];
   const lo=rows.map(()=>Infinity), hi=rows.map(()=>-Infinity);
   const GATE=rows.findIndex(r=>r[0]==='gl.hgt');   // by NAME, not a magic index
