@@ -28,7 +28,7 @@
   <div class="uiel" style="position:absolute;left:8%;bottom:18%;padding:9px 18px;background:#57c8d8;border-radius:99px;font:600 13px/1 -apple-system,system-ui,sans-serif;color:#06222a">REFLECTED · REFRACTED</div>
 </div>
 <canvas id="c"></canvas><div id="sp"></div>
-<div class="lb" id="hint"><a href="?">calibration</a> · <a href="?grid">materials</a> · <a href="?blobs">blob scene</a> · scroll moves the field</div>
+<div class="lb" id="hint"><a href="?">calibration</a> · <a href="?grid">materials</a> · <a href="?blobs">blob scene</a> · drag the blobs · scroll moves the field</div>
 <script>
 // One set = one tile (grid mode, 2 columns). Up to 6 forms per set.
 // Shape:    ct=[x,y] center · bs=[x,y] core half-size ([0,0] = point core →
@@ -669,6 +669,22 @@ function drawTiles(){
   });
   gl.disable(gl.SCISSOR_TEST);
 }
+// ---- draggable blobs -------------------------------------------------------
+// Each blob carries a decaying offset from its orbit. Dragging pins the
+// offset to the pointer (keeping the grip point); on release the offset
+// decays exponentially, so the blob GLIDES back onto its choreography.
+const BST = BLOBS.map(()=>({ox:0, oy:0, px:0, py:0}));
+let dragI = -1, dragPt = [0,0], dragOff = [0,0], lastT = null;
+function orbitPos(b, t){
+  return [ b.orbit.c[0] + b.orbit.a[0]*Math.sin(b.orbit.w[0]*t + b.orbit.ph[0]),
+           b.orbit.c[1] + b.orbit.a[1]*Math.cos(b.orbit.w[1]*t + b.orbit.ph[1]) ];
+}
+function toScene(e){
+  const r = c.getBoundingClientRect();
+  const nx = (e.clientX - r.left)/Math.max(1, r.width);
+  const ny = (e.clientY - r.top)/Math.max(1, r.height);
+  return [ (nx*2 - 1)*(r.width/Math.max(1, r.height)), 1 - 2*ny ];
+}
 function drawScene(t){
   size(1);   // look-dev scene: dpr 1, the shading is the point, not the pixels
   gl.viewport(0,0,c.width,c.height);
@@ -676,12 +692,23 @@ function drawScene(t){
   gl.uniform1f(U('uUIon'), 1.0);
   gl.uniform1f(U('uScroll'), scrollY/innerHeight*1.4);
   gl.uniform4f(U('uTile'), 0, 0, c.width, c.height);
-  const forms = BLOBS.map(b => ({
-    ct:[ b.orbit.c[0] + b.orbit.a[0]*Math.sin(b.orbit.w[0]*t + b.orbit.ph[0]),
-         b.orbit.c[1] + b.orbit.a[1]*Math.cos(b.orbit.w[1]*t + b.orbit.ph[1]) ],
-    bs: b.bs || [0,0], R:b.R, TH:b.TH, w: b.w ?? 0.02, n: b.n ?? 2,
-    albedo:b.albedo, rough:b.rough, metal:b.metal, trans:b.trans, ior:b.ior, disp:b.disp,
-  }));
+  const dt = lastT === null ? 0.016 : Math.max(0, Math.min(0.1, t - lastT));
+  lastT = t;
+  const dec = Math.exp(-dt*1.6);
+  const forms = BLOBS.map((b,i) => {
+    const st = BST[i];
+    const base = orbitPos(b, t);
+    if (i === dragI){
+      st.ox = dragPt[0] + dragOff[0] - base[0];
+      st.oy = dragPt[1] + dragOff[1] - base[1];
+    } else {
+      st.ox *= dec; st.oy *= dec;
+    }
+    st.px = base[0] + st.ox; st.py = base[1] + st.oy;
+    return { ct:[st.px, st.py],
+      bs: b.bs || [0,0], R:b.R, TH:b.TH, w: b.w ?? 0.02, n: b.n ?? 2,
+      albedo:b.albedo, rough:b.rough, metal:b.metal, trans:b.trans, ior:b.ior, disp:b.disp };
+  });
   setForms(forms, BLOB_K);
   gl.drawArrays(gl.TRIANGLES,0,3);
 }
@@ -703,6 +730,29 @@ if (CALM){
   drawCal();
 } else if (SCENE){
   buildUI();
+  // grab a blob anywhere inside (a padded hit radius), drag it, let it go —
+  // touch drags too (touch-action none trades away touch-scroll here)
+  c.style.touchAction = 'none';
+  c.addEventListener('pointerdown', e => {
+    const p = toScene(e);
+    let best = -1, bd = 1e9;
+    BLOBS.forEach((b,i) => {
+      const st = BST[i];
+      const d = Math.hypot(p[0]-st.px, p[1]-st.py);
+      const grabR = b.R + (b.bs ? Math.max(b.bs[0], b.bs[1]) : 0) + 0.08;
+      if (d < grabR && d < bd){ bd = d; best = i; }
+    });
+    if (best >= 0){
+      dragI = best; dragPt = p;
+      dragOff = [BST[best].px - p[0], BST[best].py - p[1]];
+      c.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+  });
+  c.addEventListener('pointermove', e => { if (dragI >= 0) dragPt = toScene(e); });
+  const drop = () => { dragI = -1; };
+  c.addEventListener('pointerup', drop);
+  c.addEventListener('pointercancel', drop);
   const tick = ts => { drawScene(ts/1000); requestAnimationFrame(tick); };
   requestAnimationFrame(tick);
   addEventListener('resize', ()=>{ buildUI(); drawScene(performance.now()/1000); });
