@@ -1,0 +1,620 @@
+<!doctype html>
+<!-- glass lab — analytic soap materials.
+     Everything here is computed per pixel in closed form in one WebGL2 pass:
+     curvature-continuous "soap" solids, GGX metallic-roughness shading, and
+     multi-bounce glass (refraction, internal reflections, TIR, dispersion)
+     with ZERO ray-marching — every ray-surface intersection is a small exact
+     solve. Views: calibration (default), ?grid materials, ?blobs scene. -->
+<html><head><meta charset="utf-8"><title>glass lab — analytic materials</title>
+<style>
+  html,body{margin:0;background:#07090c}
+  canvas{position:fixed;inset:0;width:100vw;height:100vh}
+  #sp{height:400vh}
+  .lb{position:fixed;color:#9fb1bf;font:12px/1.4 ui-monospace,monospace;letter-spacing:.12em;
+      text-transform:uppercase;pointer-events:none;text-shadow:0 1px 8px #000;z-index:2}
+  .lb b{color:#57c8d8;font-weight:600}
+  #hint{left:3%;bottom:2.5%;pointer-events:auto;color:#57717d}
+  #hint a{color:#57c8d8;text-decoration:none}
+</style></head><body>
+<canvas id="c"></canvas><div id="sp"></div>
+<div class="lb" id="hint"><a href="?">calibration</a> · <a href="?grid">materials</a> · <a href="?blobs">blob scene</a> · scroll moves the field</div>
+<script>
+// One set = one tile (grid mode, 2 columns). Up to 6 forms per set.
+// Shape:    ct=[x,y] center · bs=[x,y] core half-size ([0,0] = point core →
+//           round blob) · R=roll radius · TH=half-thickness · w=shoulder band
+//           · n=element exponent (4 = quartic flat-top, 2 = sphere)
+// Material: albedo, rough, metal, trans (0 = solid, 1 = clear glass; blends!),
+//           ior, disp (clear only).
+const SETS = [
+  { label:'solid dielectric · quartic', forms:[
+    {ct:[0,.40],  bs:[.44,.02], R:.17,  TH:.19,  w:.17,  n:4, albedo:[.44,.49,.55], rough:.35, metal:0, trans:0},
+    {ct:[0,-.18], bs:[.50,0],   R:.055, TH:.061, w:.055, n:4, albedo:[.44,.49,.55], rough:.35, metal:0, trans:0},
+    {ct:[0,-.62], bs:[0,0],     R:.19,  TH:.19,  w:.001, n:4, albedo:[.44,.49,.55], rough:.35, metal:0, trans:0},
+  ]},
+  { label:'gold mirror · sphere element', forms:[
+    {ct:[0,.40],  bs:[.42,.05], R:.16,  TH:.18,  w:.16,  n:2, albedo:[1,.77,.34], rough:.12, metal:1, trans:0},
+    {ct:[0,-.18], bs:[.50,0],   R:.055, TH:.061, w:.055, n:2, albedo:[1,.77,.34], rough:.12, metal:1, trans:0},
+    {ct:[0,-.62], bs:[0,0],     R:.19,  TH:.19,  w:.001, n:2, albedo:[1,.77,.34], rough:.12, metal:1, trans:0},
+  ]},
+  { label:'clear polished · rough 0', forms:[
+    {ct:[0,.42],  bs:[.42,.05], R:.16, TH:.18, w:.16,  n:4, albedo:[1,1,1], rough:0, metal:0, trans:1},
+    {ct:[0,-.42], bs:[0,0],     R:.40, TH:.40, w:.001, n:2, albedo:[1,1,1], rough:0, metal:0, trans:1},
+  ]},
+  { label:'clear frosted · rough .45', forms:[
+    {ct:[0,.42],  bs:[.42,.05], R:.16, TH:.18, w:.16,  n:4, albedo:[1,1,1], rough:.45, metal:0, trans:1},
+    {ct:[0,-.42], bs:[0,0],     R:.40, TH:.40, w:.001, n:2, albedo:[1,1,1], rough:.45, metal:0, trans:1},
+  ]},
+  { label:'thick glass · deep interior', forms:[
+    {ct:[0,.42],  bs:[.42,.05], R:.16, TH:.34, w:.16,  n:4, albedo:[1,1,1], rough:0, metal:0, trans:1},
+    {ct:[0,-.42], bs:[0,0],     R:.38, TH:.55, w:.001, n:2, albedo:[1,1,1], rough:0, metal:0, trans:1},
+  ]},
+  { label:'dispersion · prism edges', forms:[
+    {ct:[0,.42],  bs:[.42,.05], R:.16, TH:.22, w:.16,  n:2, albedo:[1,1,1], rough:0, metal:0, trans:1, ior:1.52, disp:1},
+    {ct:[0,-.42], bs:[0,0],     R:.40, TH:.40, w:.001, n:2, albedo:[1,1,1], rough:0, metal:0, trans:1, ior:1.52, disp:1},
+  ]},
+];
+// Orbits are closed-form in time: ct(t) = c + a*[sin(w0*t+p0), cos(w1*t+p1)].
+// Shape is per-blob too: bs=[0,0] (default) is a round blob; give bs extent
+// for squares/rectangles (w and n follow the grid-tile conventions).
+const BLOBS = [
+  {bs:[.15,.15], R:.10, TH:.13, w:.10, n:4,                                     // gold SQUARE card
+   albedo:[1,.77,.34],  rough:.15, metal:1, trans:0,
+   orbit:{c:[-.45,.30], a:[.38,.26], w:[.23,.31], ph:[0,1.2]}},
+  {R:.28, TH:.28, albedo:[.90,.92,.95],rough:.06, metal:1, trans:0,             // chrome ball
+   orbit:{c:[.40,.25],  a:[.34,.30], w:[.17,.26], ph:[2.1,0.4]}},
+  {R:.20, TH:.20, albedo:[.98,.55,.35],rough:.32, metal:1, trans:0,             // copper ball
+   orbit:{c:[-.35,-.35],a:[.30,.24], w:[.29,.19], ph:[4.0,2.6]}},
+  {bs:[.30,.09], R:.09, TH:.10, w:.09, n:4,                                     // stone RECTANGLE bar
+   albedo:[.55,.60,.66],rough:.55, metal:0, trans:0,
+   orbit:{c:[.42,-.38], a:[.30,.26], w:[.21,.35], ph:[1.0,3.3]}},
+  {R:.30, TH:.30, albedo:[1,1,1],      rough:0,   metal:0, trans:1,             // glass ball
+   orbit:{c:[0,-.05],   a:[.42,.30], w:[.13,.22], ph:[5.2,1.8]}},
+];
+const BLOB_K = 0.14;      // gooey fold width for the blob scene
+const TILE_K = 0.004;     // near-hard fold for the grid tiles
+// ============== calibration scene (?cal): known content, known positions ====
+// A chrome reference ball at center — the VFX mirror-ball trick. In an
+// ortho head-on view, its CENTER reflects straight back at the viewer (the
+// environment dome), and directions tilt sideways toward the rim — so the
+// colored markers should appear as warped slivers near the rim on their own
+// sides: RED left rim, GREEN right rim, BLUE top rim, checkerboard wrapping
+// the bottom rim, the window rectangle upper-right, key light upper-left.
+const CAL = [
+  {ct:[0,0],      bs:[0,0], R:.34, TH:.34, w:.001, n:2, albedo:[.92,.93,.95], rough:.02, metal:1, trans:0},  // mirror
+  {ct:[-.78,.05], bs:[0,0], R:.18, TH:.18, w:.001, n:2, albedo:[.90,.10,.08], rough:.45, metal:0, trans:0},  // RED left
+  {ct:[.78,.05],  bs:[0,0], R:.18, TH:.18, w:.001, n:2, albedo:[.08,.75,.18], rough:.45, metal:0, trans:0},  // GREEN right
+  {ct:[0,.68],    bs:[0,0], R:.14, TH:.14, w:.001, n:2, albedo:[.12,.32,.95], rough:.45, metal:0, trans:0},  // BLUE top
+  {ct:[0,-.66],   bs:[0,0], R:.20, TH:.20, w:.001, n:2, albedo:[1,1,1],       rough:0,   metal:0, trans:1},  // glass ref
+];
+const CAL_K = 0.02;       // distinct forms — calibration wants separation
+// ============================================================================
+
+const c = document.getElementById('c');
+const gl = c.getContext('webgl2');
+
+const FRAG = `#version 300 es
+precision highp float;
+uniform vec4 uTile;       // tile rect in device px: x0, y0, w, h
+uniform int  uCount;
+uniform float uK;         // smin fold width
+uniform vec4 uSA[6];      // ct.xy, bs.xy
+uniform vec4 uSB[6];      // R, TH, w, n
+uniform vec4 uMA[6];      // albedo.rgb, trans
+uniform vec4 uMB[6];      // rough, metal, ior, disp
+uniform float uScroll;
+uniform float uCal;       // 1 = calibration backdrop (checkerboard)
+out vec4 frag;
+
+float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+float shoulder(float q, float w, out float ds){
+  if (q <= 0.0){ ds = 0.0; return 0.0; }
+  if (q >= w){ ds = 1.0; return q - 0.5*w; }
+  float t = q/w, t2 = t*t;
+  ds = t*t2*(10.0 + t*(-15.0 + 6.0*t));
+  return w*t2*t2*(2.5 + t*(-3.0 + t));
+}
+// C3 compact-support smin fold (production sqPhi)
+float sqPhi(float u, out float dphi){
+  if (u >= 1.0){ dphi = 0.0; return 0.0; }
+  if (u <= -1.0){ dphi = 1.0; return u; }
+  float w = u*u - 1.0;
+  float Av = -0.5 + w*(-0.25    + w*( 0.0625  + w*(-0.03125 + w*(-0.09375))));
+  float Ad = -0.25 + w*( 0.125  + w*(-0.09375 + w*(-0.375)));
+  dphi = 0.5 + 2.0*u*Ad;
+  return 0.5*u + Av;
+}
+// Per-form F-form pieces at p (production soapCell, per-form exponent n):
+// t_i(zeta) = (c4 + a4*zeta)^(1/n... ) — we keep n=4 math in zeta=z^4 space
+// by folding the per-form exponent into an EFFECTIVE quartic: forms with n=2
+// use z^2 = sqrt(zeta) internally via their own a-term. To keep the solver
+// single-variable we evaluate each form's field at z = zeta^(1/4) directly.
+void formSetup(vec2 p, int i, out float rr, out vec2 drdp, out float R, out float TH, out float en){
+  vec2 ct = uSA[i].xy, bs = uSA[i].zw;
+  R = uSB[i].x; TH = uSB[i].y; en = uSB[i].w;
+  float w = uSB[i].z;
+  vec2 rel = p - ct;
+  if (bs.x + bs.y < 1e-5){
+    // POINT CORE: pure radial offset. The per-axis shoulder would leave a
+    // w-wide dip along each axis — a cross-shaped dimple through the blob's
+    // middle that mirror materials expose. A point core has no flat region,
+    // so no shoulder is needed at all.
+    rr = length(rel);
+    drdp = rr > 1e-6 ? rel/rr : vec2(0.0);
+    return;
+  }
+  vec2 q = abs(rel) - bs;
+  float dsx, dsy;
+  float sx = shoulder(q.x, w, dsx);
+  float sy = shoulder(q.y, w, dsy);
+  rr = sqrt(sx*sx + sy*sy);
+  drdp = rr > 1e-6 ? vec2(sx*dsx*sign(rel.x), sy*dsy*sign(rel.y))/rr : vec2(0.0);
+}
+// Fast powers: the element exponent is only ever 2 or 4, and pow() was the
+// dominant per-pixel cost (measured 57ms/frame on the blob scene before).
+float pn(float x, float en){ float x2 = x*x; return en < 3.0 ? x2 : x2*x2; }     // x^en
+float rn(float x, float en){ return en < 3.0 ? sqrt(x) : sqrt(sqrt(x)); }        // x^(1/en)
+float pm1(float x, float en){ return en < 3.0 ? x : x*x*x; }                     // x^(en-1)
+// Per-form field F_i(z) = (r^n + (R/TH)^n z^n)^(1/n) - R and its dF/dz, dF/dp
+void formF(float rr, vec2 drdp, float R, float TH, float en, float z,
+           out float F, out float dFdz, out vec2 dFdp){
+  float ar = R/TH;
+  float tn = pn(max(rr,1e-6), en) + pn(ar*max(z,0.0), en);
+  float t1 = rn(max(tn,1e-9), en);
+  F = t1 - R;
+  float i1 = t1/max(tn,1e-9);                     // tn^(1/en - 1)
+  dFdz = i1*pn(ar,en)*pm1(max(z,1e-6), en);
+  dFdp = i1*pm1(max(rr,1e-6), en)*drdp;
+}
+// Cheap z=0 fold only — silhouette + folded materials, no Newton, no
+// gradient. Most pixels (background) stop here.
+float sceneDist(vec2 p, out vec4 MA, out vec4 MB){
+  float rr; vec2 dr; float R; float TH; float en;
+  formSetup(p, 0, rr, dr, R, TH, en);
+  float g = rr - R; MA = uMA[0]; MB = uMB[0];
+  for (int i = 1; i < 6; i++){
+    if (i >= uCount) break;
+    formSetup(p, i, rr, dr, R, TH, en);
+    float dph; g += uK*sqPhi(((rr - R) - g)/uK, dph);
+    MA = mix(MA, uMA[i], dph);
+    MB = mix(MB, uMB[i], dph);
+  }
+  return g;
+}
+// THE union solver: folds all forms' fields (production order), Newton on z,
+// analytic folded gradient, and MATERIALS folded on the z=0 weights — the
+// blob-absorption mechanic: when forms blend, their materials smear too.
+float sceneSolve(vec2 p, out vec3 nrm, out float d0, out vec4 MA, out vec4 MB){
+  float rr[6]; vec2 dr[6]; float R[6]; float TH[6]; float en[6];
+  float zmax = 0.0;
+  for (int i = 0; i < 6; i++){
+    if (i >= uCount) break;
+    formSetup(p, i, rr[i], dr[i], R[i], TH[i], en[i]);
+    // exact per-cell root as the Newton seed (max over cells)
+    float u = clamp(rr[i]/R[i], 0.0, 1.0);
+    float zi = TH[i]*rn(max(1.0-pn(u, en[i]), 0.0), en[i]);
+    zmax = max(zmax, zi);
+  }
+  // z = 0 fold: silhouette field + material carry on the SAME weights
+  {
+    float F; float dz; vec2 dp;
+    formF(rr[0], dr[0], R[0], TH[0], en[0], 0.0, F, dz, dp);
+    float g = F; MA = uMA[0]; MB = uMB[0];
+    for (int i = 1; i < 6; i++){
+      if (i >= uCount) break;
+      formF(rr[i], dr[i], R[i], TH[i], en[i], 0.0, F, dz, dp);
+      float dph; g += uK*sqPhi((F - g)/uK, dph);
+      MA = mix(MA, uMA[i], dph);
+      MB = mix(MB, uMB[i], dph);
+    }
+    d0 = g;
+  }
+  // Newton on the folded field in z (seeded at the deepest single-form root)
+  float z = zmax;
+  for (int it = 0; it < 3; it++){
+    float F0; float dz0; vec2 dp0;
+    formF(rr[0], dr[0], R[0], TH[0], en[0], z, F0, dz0, dp0);
+    float g = F0, dg = dz0;
+    for (int i = 1; i < 6; i++){
+      if (i >= uCount) break;
+      float Fi; float dzi; vec2 dpi;
+      formF(rr[i], dr[i], R[i], TH[i], en[i], z, Fi, dzi, dpi);
+      float dph; float ph = sqPhi((Fi - g)/uK, dph);
+      g += uK*ph;
+      dg = mix(dg, dzi, dph);
+    }
+    z = clamp(z - g/max(dg, 1e-6), 0.0, 2.0*zmax + uK);
+  }
+  // folded gradient at the root
+  {
+    float F0; float dz0; vec2 dp0;
+    formF(rr[0], dr[0], R[0], TH[0], en[0], z, F0, dz0, dp0);
+    float g = F0; vec3 G = vec3(dp0, dz0);
+    for (int i = 1; i < 6; i++){
+      if (i >= uCount) break;
+      float Fi; float dzi; vec2 dpi;
+      formF(rr[i], dr[i], R[i], TH[i], en[i], z, Fi, dzi, dpi);
+      float dph; float ph = sqPhi((Fi - g)/uK, dph);
+      g += uK*ph;
+      G = mix(G, vec3(dpi, dzi), dph);
+    }
+    float l = length(G);
+    nrm = l > 1e-9 ? G/l : vec3(0.0,0.0,1.0);   // n = +grad F (dF/dz > 0 up)
+  }
+  return z;
+}
+// z-only union height: setup + Newton, no gradient, no material fold — the
+// root-finder workhorse for ray casting
+float sceneH(vec2 p){
+  float rr[6]; vec2 dr[6]; float R[6]; float TH[6]; float en[6];
+  float zmax = 0.0;
+  for (int i = 0; i < 6; i++){
+    if (i >= uCount) break;
+    formSetup(p, i, rr[i], dr[i], R[i], TH[i], en[i]);
+    float u = clamp(rr[i]/R[i], 0.0, 1.0);
+    zmax = max(zmax, TH[i]*rn(max(1.0-pn(u, en[i]), 0.0), en[i]));
+  }
+  float z = zmax;
+  for (int it = 0; it < 3; it++){
+    float F0; float dz0; vec2 dp0;
+    formF(rr[0], dr[0], R[0], TH[0], en[0], z, F0, dz0, dp0);
+    float g = F0, dg = dz0;
+    for (int i = 1; i < 6; i++){
+      if (i >= uCount) break;
+      float Fi; float dzi; vec2 dpi;
+      formF(rr[i], dr[i], R[i], TH[i], en[i], z, Fi, dzi, dpi);
+      float dph; float ph = sqPhi((Fi - g)/uK, dph);
+      g += uK*ph;
+      dg = mix(dg, dzi, dph);
+    }
+    z = clamp(z - g/max(dg, 1e-6), 0.0, 2.0*zmax + uK);
+  }
+  return z;
+}
+// Ray-vs-union crossing: BRACKET with constant steps, then BISECT. Bisection
+// cannot oscillate and is smooth in its inputs — the fixed-point refine this
+// replaces rippled at grazing incidence (neighboring pixels landed on
+// different roots, and the boundary swept across moving blobs as waves).
+// g(s) = pos.z + s*dir.z - sgn*H(xy(s)); sgn +1 = front surface, -1 = back.
+float castRay(vec3 pos, vec3 dir, float sgn, float s0, out vec2 xy){
+  const float ds = 0.10;
+  float s = s0;
+  xy = pos.xy + dir.xy*s;
+  float g = pos.z + s*dir.z - sgn*sceneH(xy);
+  float armed = 0.0, gSign = 0.0;
+  for (int i = 0; i < 12; i++){
+    if (armed < 0.5 && abs(g) > 0.015){ armed = 1.0; gSign = g > 0.0 ? 1.0 : -1.0; }
+    float sA = s;
+    s += ds;
+    xy = pos.xy + dir.xy*s;
+    g = pos.z + s*dir.z - sgn*sceneH(xy);
+    if (armed > 0.5 && g*gSign < 0.0){
+      float lo = sA, hi = s;
+      for (int b = 0; b < 6; b++){
+        float mid = 0.5*(lo+hi);
+        vec2 mxy = pos.xy + dir.xy*mid;
+        float gm = pos.z + mid*dir.z - sgn*sceneH(mxy);
+        if (gm*gSign > 0.0) lo = mid; else hi = mid;
+      }
+      float sm = 0.5*(lo+hi);
+      xy = pos.xy + dir.xy*sm;
+      return sm;
+    }
+  }
+  return -1.0;
+}
+
+vec3 bgAt(vec2 p){
+  p.y += uScroll;
+  if (uCal > 0.5){
+    // calibration checkerboard: high contrast, big squares — refraction and
+    // reflection distortions become legible at a glance
+    float ck = mod(floor(p.x*3.0) + floor(p.y*3.0), 2.0);
+    return mix(vec3(0.06,0.07,0.09), vec3(0.55,0.58,0.62), ck);
+  }
+  float st = smoothstep(0.35,0.65, fract(p.x*3.0));
+  vec3 col = mix(vec3(0.055,0.075,0.10), vec3(0.10,0.14,0.18), st);
+  vec2 g = fract(p*14.0)-0.5;
+  col += smoothstep(0.16,0.10,length(g))*vec3(0.10,0.30,0.36);
+  col += vec3(0.02,0.03,0.045)*(fract(p.y*0.25)+0.5);
+  return col;
+}
+vec3 bgBlur(vec2 p, float rad){
+  if (rad < 1e-4) return bgAt(p);
+  float ja = hash21(gl_FragCoord.xy)*6.28318;
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 8; i++){
+    float fi = float(i);
+    float rrr = sqrt((fi+0.5)/8.0)*rad;
+    float ang = fi*2.399963 + ja;
+    acc += bgAt(p + vec2(cos(ang),sin(ang))*rrr);
+  }
+  return acc/8.0;
+}
+const vec3 KEY_L   = vec3(-0.42,0.60,0.72);
+const vec3 KEY_COL = vec3(1.9,1.95,2.0);
+vec3 envAt(vec3 d){
+  d = normalize(d);
+  vec3 e = mix(vec3(0.015,0.020,0.035), vec3(0.05,0.09,0.13), clamp(d.z*0.5+0.5,0.0,1.0));
+  e += vec3(0.22,0.28,0.34)*pow(1.0-abs(d.z), 6.0);
+  float k = max(dot(d, normalize(KEY_L)), 0.0);
+  e += KEY_COL*3.2*pow(k, 22.0) + KEY_COL*0.8*pow(k, 5.0);
+  vec3 wd = normalize(vec3(0.78, 0.12, 0.42));
+  vec3 wu = normalize(cross(vec3(0.0,0.0,1.0), wd));
+  vec3 wv = cross(wd, wu);
+  float wf = max(dot(d, wd), 0.0);
+  vec2 uv = vec2(dot(d,wu), dot(d,wv))/max(wf, 1e-3);
+  float box = smoothstep(0.07,-0.07, abs(uv.x)-0.55)
+            * smoothstep(0.06,-0.06, abs(uv.y)-0.30) * step(0.001, wf);
+  float bars = smoothstep(0.10, 0.02, abs(abs(uv.x)-0.28));
+  e += vec3(0.45,0.75,0.95)*2.6*box*(1.0-0.75*bars)*pow(wf, 2.0);
+  float r2 = max(dot(d, normalize(vec3(-0.55,-0.35,0.18))), 0.0);
+  e += vec3(0.55,0.25,0.75)*1.1*pow(r2, 8.0);
+  return e;
+}
+vec3 worldAt(vec3 dir, vec2 p){
+  float toBg = smoothstep(0.15, 0.55, -normalize(dir).z);
+  return mix(envAt(dir), bgAt(p + dir.xy*0.85)*1.7, toBg);
+}
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0);
+}
+vec3 specGGX(vec3 n, vec3 V, vec3 L, float rough, vec3 F0){
+  vec3 H = normalize(L+V);
+  float a = max(rough*rough, 1e-3), a2 = a*a;
+  float NdL = max(dot(n,L),0.0), NdV = max(dot(n,V),1e-4);
+  float NdH = max(dot(n,H),0.0), VdH = max(dot(V,H),0.0);
+  float D = a2/(3.14159*pow(NdH*NdH*(a2-1.0)+1.0, 2.0));
+  float kk = (rough+1.0); kk = kk*kk/8.0;
+  float G = (NdV/(NdV*(1.0-kk)+kk)) * (NdL/(NdL*(1.0-kk)+kk));
+  vec3 F = F0 + (1.0-F0)*pow(1.0-VdH, 5.0);
+  return D*G*F/(4.0*NdV*NdL + 1e-4) * NdL;
+}
+
+// ---- INTER-OBJECT REFLECTIONS ---------------------------------------------
+// One closed-form bounce against the whole scene: solve the reflected ray vs
+// the union's FRONT surface (same fixed-point as the glass interior), shade
+// the hit with the folded material at that point (cheap: lambert + fresnel
+// env), else fall through to the studio/backdrop. No marching, no recursion.
+vec3 cheapShade(vec2 xy, vec3 n, vec4 MA, vec4 MB){
+  vec3 L = normalize(KEY_L);
+  vec3 base = MA.rgb*(max(dot(n,L),0.0)*0.55 + 0.18)*mix(vec3(1.0), KEY_COL, 0.4);
+  base += specGGX(n, vec3(0,0,1), L, max(MB.x,0.15), mix(vec3(0.04), MA.rgb, MB.y))*KEY_COL*0.6;
+  base = mix(base, base*0.4 + worldAt(reflect(vec3(0,0,-1), n), xy)*0.5, MB.y*0.5);
+  return mix(base, bgAt(xy), MA.w*0.85);     // clear neighbors: mostly see-through
+}
+vec3 reflScene(vec3 pos, vec3 dir, vec2 pref){
+  vec2 xy;
+  float s = castRay(pos, dir, 1.0, 0.05, xy);
+  if (s < 0.0) return worldAt(dir, pref);
+  vec3 n; vec4 MA; vec4 MB; float dS;
+  sceneSolve(xy, n, dS, MA, MB);
+  if (dS >= 0.0) return worldAt(dir, pref);   // crossed the z=0 plane off-form
+  // very grazing directions still soften toward the env: the head-on
+  // projection is least trustworthy at the equator
+  float w = 0.25 + 0.75*smoothstep(0.0, 0.12, abs(dir.z));
+  return mix(worldAt(dir, pref), cheapShade(xy, n, MA, MB), w);
+}
+
+vec3 pbr(vec3 n, vec2 p, float z, vec3 albedo, float rough, float metal){
+  vec3 V = vec3(0.0,0.0,1.0);
+  vec3 L = normalize(KEY_L);
+  float NdL = max(dot(n,L),0.0), NdV = max(dot(n,V),1e-4);
+  vec3 F0 = mix(vec3(0.04), albedo, metal);
+  vec3 spec = specGGX(n, V, L, rough, F0);
+  vec3 Fv = F0 + (1.0-F0)*pow(1.0-NdV, 5.0);
+  vec3 kd = (1.0-Fv)*(1.0-metal);
+  vec3 col = (kd*albedo/3.14159*NdL + spec)*KEY_COL;
+  vec3 irr = mix(envAt(n), vec3(0.06,0.08,0.10), 0.5);
+  col += kd*albedo*irr*0.6;
+  vec3 refl = reflect(-V,n);
+  float reflW = max(metal, 1.0-rough);             // can this BRDF even show it?
+  vec3 world = reflW > 0.45 ? reflScene(vec3(p, z), refl, p) : worldAt(refl, p);
+  vec3 envSpec = mix(world, vec3(0.055,0.08,0.11), rough*rough);
+  vec3 Fa = F0 + (max(vec3(1.0-rough),F0)-F0)*pow(1.0-NdV,5.0);
+  col += envSpec*Fa;
+  return col;
+}
+
+// ---- multi-bounce clear glass on the blended union ------------------------
+// interior legs use the same bracketed bisection as reflections: TIR legs go
+// grazing, and the fixed-point refine rippled there exactly as it did on
+// scene reflections
+vec3 clearGlass(vec2 p, vec3 n1, float z1, float dSil, float rgh, float IOR, float disp){
+  float aa   = fwidth(dSil);
+  IOR = max(IOR, 1.01);
+  float blurR = rgh*rgh*0.10 + 0.0015*step(0.01, rgh);
+  vec3 I  = vec3(0.0,0.0,-1.0);
+  vec3 Lt = normalize(refract(-normalize(KEY_L), vec3(0.0,0.0,1.0), 1.0/IOR));
+  vec3 acc = vec3(0.0);
+  vec3 T   = vec3(1.0);
+  vec3 dir = refract(I, n1, 1.0/IOR);
+  vec3 pos = vec3(p, z1);
+  for (int b = 0; b < 3; b++){
+    float sgn = dir.z < 0.0 ? -1.0 : 1.0;
+    vec2 xy;
+    float s = castRay(pos, dir, sgn, 0.02, xy);
+    vec3 nf; vec4 A2; vec4 B2; float dS = 1e9; float zh = 0.0;
+    if (s >= 0.0) zh = sceneSolve(xy, nf, dS, A2, B2);
+    if (s < 0.0 || dS >= 0.0){                       // escaped past the equator
+      acc += T*bgBlur((s < 0.0 ? pos.xy + dir.xy*0.8 : xy), blurR);
+      T = vec3(0.0); break;
+    }
+    T *= exp(-vec3(0.50,0.16,0.10)*s*0.9);
+    vec3 n_o = sgn < 0.0 ? vec3(nf.xy, -nf.z) : nf;
+    vec3 tOut = refract(dir, -n_o, IOR);
+    float Fr = 1.0;
+    if (dot(tOut,tOut) > 1e-6){
+      float cosT = clamp(dot(tOut, n_o), 0.0, 1.0);
+      Fr = 0.04 + 0.96*pow(1.0-cosT, 5.0);
+      vec3 ex;
+      if (tOut.z < 0.0){
+        float s3 = (abs(zh) + 0.30)/max(-tOut.z, 0.30);
+        if (b == 0 && disp > 0.001){
+          ex = vec3(bgBlur(xy + tOut.xy*s3*(1.0-0.05*disp), blurR).r,
+                    bgBlur(xy + tOut.xy*s3,                 blurR).g,
+                    bgBlur(xy + tOut.xy*s3*(1.0+0.05*disp), blurR).b);
+        } else {
+          ex = bgBlur(xy + tOut.xy*s3, blurR);
+        }
+      } else {
+        ex = mix(worldAt(tOut, xy), vec3(0.055,0.08,0.11), rgh*rgh);
+      }
+      acc += T*(1.0-Fr)*ex;
+    }
+    acc += T*specGGX(sgn < 0.0 ? -n_o : n_o, -dir, -Lt, max(rgh,0.06), vec3(0.04))*KEY_COL*0.6;
+    dir = reflect(dir, n_o);
+    pos = vec3(xy, sgn*zh);
+    T *= Fr;
+    if (max(T.r, max(T.g, T.b)) < 0.02) break;
+  }
+  acc += T*worldAt(dir, pos.xy)*0.5;
+  float f = 0.04 + 0.96*pow(1.0-clamp(n1.z,0.0,1.0), 5.0);
+  vec3 frontRefl = mix(reflScene(vec3(p, z1), reflect(I,n1), p), vec3(0.055,0.08,0.11), rgh*rgh);
+  vec3 col = mix(acc, frontRefl, f);
+  col += specGGX(n1, vec3(0.0,0.0,1.0), normalize(KEY_L), max(rgh,0.06), vec3(0.04))*KEY_COL;
+  return mix(bgAt(p), col, smoothstep(aa,-aa,dSil));
+}
+
+void main(){
+  vec2 lp = ((gl_FragCoord.xy - uTile.xy)/uTile.zw)*2.0 - 1.0;
+  lp.x *= uTile.z/uTile.w;
+  vec4 MA; vec4 MB;
+  float dS = sceneDist(lp, MA, MB);        // cheap: most pixels stop here
+  vec3 col;
+  float aa = fwidth(dS);
+  if (dS >= aa){
+    col = bgAt(lp)*(1.0 - 0.30*smoothstep(0.07, 0.0, dS));
+  } else {
+    vec3 nn; float dFold;
+    float z = sceneSolve(lp, nn, dFold, MA, MB);
+    // materials arrive FOLDED: a gold blob melting into a glass blob shades
+    // as the blend of both models, weighted by the folded trans channel
+    vec3 solidCol = pbr(nn, lp, z, MA.rgb, MB.x, MB.y);
+    float tr = clamp(MA.w, 0.0, 1.0);
+    col = solidCol;
+    if (tr > 0.01){
+      vec3 glassCol = clearGlass(lp, nn, z, dS, MB.x, MB.z, MB.w);
+      col = mix(solidCol, glassCol, tr);
+    }
+    col = mix(bgAt(lp)*(1.0 - 0.30*smoothstep(0.07, 0.0, dS)), col, smoothstep(aa,-aa,dS));
+  }
+  frag = vec4(pow(aces(col), vec3(0.95)), 1.0);
+}`;
+
+const VERT = `#version 300 es
+void main(){ vec2 v=vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position=vec4(v*2.0-1.0,0.0,1.0); }`;
+function sh(t,s){ const o=gl.createShader(t); gl.shaderSource(o,s); gl.compileShader(o);
+  if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; }
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const U = n => gl.getUniformLocation(prog, n);
+
+const SCENE = /blobs/.test(location.search);
+const CALM  = !SCENE && !/grid/.test(location.search);
+const COLS = 2, ROWS = Math.ceil(SETS.length/COLS);
+if (CALM){
+  const d = document.createElement('div');
+  d.className = 'lb';
+  d.innerHTML = '<b>calibration</b><br>chrome ball: red = left rim, green = right rim, blue = top rim,<br>checker wraps the bottom, window upper-right, key light upper-left';
+  d.style.left = '3%'; d.style.top = '3%';
+  document.body.appendChild(d);
+} else if (!SCENE){
+  SETS.forEach((s,i)=>{
+    const d = document.createElement('div');
+    d.className = 'lb';
+    d.innerHTML = '<b>'+s.label+'</b>';
+    d.style.left = (i%COLS)*50 + 3 + '%';
+    d.style.top  = Math.floor(i/COLS)*(100/ROWS) + 2.5 + '%';
+    document.body.appendChild(d);
+  });
+} else {
+  const d = document.createElement('div');
+  d.className = 'lb';
+  d.innerHTML = '<b>blob scene</b><br>materials blend as forms merge';
+  d.style.left = '3%'; d.style.top = '3%';
+  document.body.appendChild(d);
+}
+
+function setForms(forms, K){
+  const SA=new Float32Array(24), SB=new Float32Array(24), MA=new Float32Array(24), MB=new Float32Array(24);
+  forms.slice(0,6).forEach((f,i)=>{
+    SA.set([f.ct[0],f.ct[1],f.bs[0],f.bs[1]], i*4);
+    SB.set([f.R,f.TH,f.w,f.n], i*4);
+    MA.set([...f.albedo, f.trans||0], i*4);
+    MB.set([f.rough||0, f.metal||0, f.ior||1.5, f.disp||0], i*4);
+  });
+  gl.uniform4fv(U('uSA[0]'), SA); gl.uniform4fv(U('uSB[0]'), SB);
+  gl.uniform4fv(U('uMA[0]'), MA); gl.uniform4fv(U('uMB[0]'), MB);
+  gl.uniform1f(U('uK'), K);
+  gl.uniform1i(U('uCount'), Math.min(forms.length,6));
+}
+function size(maxDpr){
+  const dpr = Math.min(devicePixelRatio||1, maxDpr);
+  const r = c.getBoundingClientRect();
+  const w = Math.max(1, Math.round((r.width  || document.documentElement.clientWidth )*dpr));
+  const h = Math.max(1, Math.round((r.height || document.documentElement.clientHeight)*dpr));
+  if (c.width !== w || c.height !== h){ c.width = w; c.height = h; }
+}
+function drawTiles(){
+  size(2);
+  gl.viewport(0,0,c.width,c.height);
+  gl.uniform1f(U('uCal'), 0.0);
+  gl.enable(gl.SCISSOR_TEST);
+  gl.uniform1f(U('uScroll'), scrollY/innerHeight*1.4);
+  const tw = c.width/COLS, th = c.height/ROWS;
+  SETS.forEach((s,i)=>{
+    const x0 = (i%COLS)*tw, y0 = c.height - (Math.floor(i/COLS)+1)*th;
+    gl.scissor(x0, y0, tw, th);
+    gl.uniform4f(U('uTile'), x0, y0, tw, th);
+    setForms(s.forms, TILE_K);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+  });
+  gl.disable(gl.SCISSOR_TEST);
+}
+function drawScene(t){
+  size(1);   // look-dev scene: dpr 1, the shading is the point, not the pixels
+  gl.viewport(0,0,c.width,c.height);
+  gl.uniform1f(U('uCal'), 0.0);
+  gl.uniform1f(U('uScroll'), scrollY/innerHeight*1.4);
+  gl.uniform4f(U('uTile'), 0, 0, c.width, c.height);
+  const forms = BLOBS.map(b => ({
+    ct:[ b.orbit.c[0] + b.orbit.a[0]*Math.sin(b.orbit.w[0]*t + b.orbit.ph[0]),
+         b.orbit.c[1] + b.orbit.a[1]*Math.cos(b.orbit.w[1]*t + b.orbit.ph[1]) ],
+    bs: b.bs || [0,0], R:b.R, TH:b.TH, w: b.w ?? 0.02, n: b.n ?? 2,
+    albedo:b.albedo, rough:b.rough, metal:b.metal, trans:b.trans, ior:b.ior, disp:b.disp,
+  }));
+  setForms(forms, BLOB_K);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+function drawCal(){
+  size(2);
+  gl.viewport(0,0,c.width,c.height);
+  gl.uniform1f(U('uCal'), 1.0);
+  gl.uniform1f(U('uScroll'), scrollY/innerHeight*1.4);
+  gl.uniform4f(U('uTile'), 0, 0, c.width, c.height);
+  setForms(CAL, CAL_K);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+if (CALM){
+  addEventListener('resize', drawCal);
+  addEventListener('load', drawCal);
+  addEventListener('scroll', drawCal, {passive:true});
+  requestAnimationFrame(drawCal);
+  drawCal();
+} else if (SCENE){
+  const tick = ts => { drawScene(ts/1000); requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  addEventListener('resize', ()=>drawScene(performance.now()/1000));
+} else {
+  const draw = ()=>drawTiles();
+  addEventListener('resize', draw);
+  addEventListener('load', draw);
+  addEventListener('scroll', draw, {passive:true});
+  requestAnimationFrame(draw);
+  draw();
+}
+</script></body></html>
