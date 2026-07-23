@@ -287,6 +287,9 @@ float castRay(vec3 pos, vec3 dir, float sgn, float s0, out vec2 xy){
     s += ds;
     xy = pos.xy + dir.xy*s;
     g = pos.z + s*dir.z - sgn*sceneH(xy);
+    // rising rays that clear the tallest possible surface can never hit:
+    // stop instead of marching the full budget to conclude a miss
+    if (dir.z > 0.0 && pos.z + s*dir.z > 0.75) return -1.0;
     if (armed > 0.5 && g*gSign < 0.0){
       float lo = sA, hi = s;
       for (int b = 0; b < 6; b++){
@@ -303,35 +306,18 @@ float castRay(vec3 pos, vec3 dir, float sgn, float s0, out vec2 xy){
   return -1.0;
 }
 
-// Analytically band-limited checker (iq's checkersGrad): integrates the
-// square wave over the pixel footprint, so sub-pixel cells settle to grey
-// instead of shimmering.
-float checkersGrad(vec2 p, vec2 w){
-  w = abs(w) + 1e-4;
-  vec2 i = 2.0*(abs(fract((p-0.5*w)*0.5)-0.5) - abs(fract((p+0.5*w)*0.5)-0.5))/w;
-  return 0.5 - 0.5*i.x*i.y;
-}
-// The background patterns are PROCEDURAL — no mipmaps — so every strongly
-// bent reflection/refraction used to point-sample them into moire. Each
-// pattern is band-limited by the warped coordinate's screen footprint
-// (derivatives of p AFTER all the optics), fading to its mean color as its
-// period goes sub-pixel.
 vec3 bgAt(vec2 p){
   p.y += uScroll;
-  vec2 dx = dFdx(p), dy = dFdy(p);
-  float fp = max(length(dx), length(dy));           // footprint in field units
   if (uCal > 0.5){
-    float ck = checkersGrad(p*3.0, (abs(dx)+abs(dy))*3.0);
+    // calibration checkerboard: high contrast, big squares — refraction and
+    // reflection distortions become legible at a glance
+    float ck = mod(floor(p.x*3.0) + floor(p.y*3.0), 2.0);
     return mix(vec3(0.06,0.07,0.09), vec3(0.55,0.58,0.62), ck);
   }
-  float stFade = clamp(fp*3.0*2.0 - 0.15, 0.0, 1.0);
-  float st = mix(smoothstep(0.35,0.65, fract(p.x*3.0)), 0.5, stFade);
+  float st = smoothstep(0.35,0.65, fract(p.x*3.0));
   vec3 col = mix(vec3(0.055,0.075,0.10), vec3(0.10,0.14,0.18), st);
   vec2 g = fract(p*14.0)-0.5;
-  float fpc = fp*14.0;                              // footprint in dot cells
-  float dotv = smoothstep(0.16 + 0.6*fpc, 0.10, length(g));
-  dotv = mix(dotv, 0.055, clamp(fpc*1.6 - 0.25, 0.0, 1.0));   // mean coverage
-  col += dotv*vec3(0.10,0.30,0.36);
+  col += smoothstep(0.16,0.10,length(g))*vec3(0.10,0.30,0.36);
   col += vec3(0.02,0.03,0.045)*(fract(p.y*0.25)+0.5);
   return col;
 }
@@ -409,12 +395,6 @@ vec3 reflScene(vec3 pos, vec3 dir, vec2 pref){
   // very grazing directions still soften toward the env: the head-on
   // projection is least trustworthy at the equator
   float w = 0.25 + 0.75*smoothstep(0.0, 0.12, abs(dir.z));
-  // EDGE AA FOR REFLECTED SILHOUETTES: fade by hit depth inside the neighbor.
-  // At a reflected object's fringe the ray merely clips its edge; the
-  // crossing dip gets narrower than the bracket step and hit/miss alternates
-  // against the step lattice — a moire fringe. Fading the shallow-hit band
-  // toward the env makes both alternatives converge to the same color.
-  w *= smoothstep(0.0, 0.035, -dS);
   return mix(worldAt(dir, pref), cheapShade(xy, n, MA, MB), w);
 }
 
@@ -455,7 +435,20 @@ vec3 clearGlass(vec2 p, vec3 n1, float z1, float dSil, float rgh, float IOR, flo
   for (int b = 0; b < 3; b++){
     float sgn = dir.z < 0.0 ? -1.0 : 1.0;
     vec2 xy;
-    float s = castRay(pos, dir, sgn, 0.02, xy);
+    float s;
+    if (abs(dir.z) >= 0.40){
+      // STEEP legs: the plain 3-step fixed-point solve converges fine — the
+      // ripples only ever lived at grazing incidence — at a sixth of the
+      // bisection cost. Bisection stays for the grazing (TIR) legs below.
+      s = 0.12;
+      for (int i = 0; i < 3; i++){
+        xy = pos.xy + dir.xy*s;
+        s = clamp((sgn*sceneH(xy) - pos.z)/dir.z, 0.02, 4.0);
+      }
+      xy = pos.xy + dir.xy*s;
+    } else {
+      s = castRay(pos, dir, sgn, 0.02, xy);
+    }
     vec3 nf; vec4 A2; vec4 B2; float dS = 1e9; float zh = 0.0;
     if (s >= 0.0) zh = sceneSolve(xy, nf, dS, A2, B2);
     if (s < 0.0 || dS >= 0.0){                       // escaped past the equator
@@ -511,13 +504,16 @@ void main(){
     vec3 nn; float dFold;
     float z = sceneSolve(lp, nn, dFold, MA, MB);
     // materials arrive FOLDED: a gold blob melting into a glass blob shades
-    // as the blend of both models, weighted by the folded trans channel
-    vec3 solidCol = pbr(nn, lp, z, MA.rgb, MB.x, MB.y);
+    // as the blend of both models, weighted by the folded trans channel.
+    // Each model runs ONLY where its weight is visible — pure-glass pixels
+    // were paying the full solid path (including its scene-reflection cast)
+    // for a contribution the mix then threw away.
     float tr = clamp(MA.w, 0.0, 1.0);
-    col = solidCol;
-    if (tr > 0.01){
-      vec3 glassCol = clearGlass(lp, nn, z, dS, MB.x, MB.z, MB.w);
-      col = mix(solidCol, glassCol, tr);
+    if (tr > 0.99){
+      col = clearGlass(lp, nn, z, dS, MB.x, MB.z, MB.w);
+    } else {
+      col = pbr(nn, lp, z, MA.rgb, MB.x, MB.y);
+      if (tr > 0.01) col = mix(col, clearGlass(lp, nn, z, dS, MB.x, MB.z, MB.w), tr);
     }
     col = mix(bgAt(lp)*(1.0 - 0.30*smoothstep(0.07, 0.0, dS)), col, smoothstep(aa,-aa,dS));
   }
