@@ -16,6 +16,17 @@
   #hint{left:3%;bottom:2.5%;pointer-events:auto;color:#57717d}
   #hint a{color:#57c8d8;text-decoration:none}
 </style></head><body>
+<!-- Real DOM elements that exist INSIDE the rendered scene: they sit under
+     the canvas (the canvas paints everything), get rasterized into the
+     backdrop texture at their measured positions, and from there refract
+     through the glass and reflect in the metals like any other scene
+     content. Edit them here; the raster mirrors them on resize. -->
+<div id="ui" style="position:fixed;inset:0;z-index:0">
+  <div class="uiel" style="position:absolute;left:6%;top:8%;font:600 42px/1.1 -apple-system,system-ui,sans-serif;color:#dfe9f2;letter-spacing:-0.02em">Soap Engine</div>
+  <div class="uiel" style="position:absolute;left:6%;top:15%;font:12px/1.4 ui-monospace,monospace;color:#57c8d8;letter-spacing:.14em">ANALYTIC MATERIALS · ZERO MARCHING</div>
+  <div class="uiel" style="position:absolute;right:7%;top:34%;width:220px;padding:14px 16px;background:#101820;border:1px solid #23404a;border-radius:14px;font:13px/1.5 -apple-system,system-ui,sans-serif;color:#aebecb">Materials fold on the same weights as geometry.</div>
+  <div class="uiel" style="position:absolute;left:8%;bottom:18%;padding:9px 18px;background:#57c8d8;border-radius:99px;font:600 13px/1 -apple-system,system-ui,sans-serif;color:#06222a">REFLECTED · REFRACTED</div>
+</div>
 <canvas id="c"></canvas><div id="sp"></div>
 <div class="lb" id="hint"><a href="?">calibration</a> · <a href="?grid">materials</a> · <a href="?blobs">blob scene</a> · scroll moves the field</div>
 <script>
@@ -103,6 +114,8 @@ uniform vec4 uMA[6];      // albedo.rgb, trans
 uniform vec4 uMB[6];      // rough, metal, ior, disp
 uniform float uScroll;
 uniform float uCal;       // 1 = calibration backdrop (checkerboard)
+uniform sampler2D uUI;    // rasterized DOM elements, viewport space
+uniform float uUIon;
 out vec4 frag;
 
 float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -307,18 +320,29 @@ float castRay(vec3 pos, vec3 dir, float sgn, float s0, out vec2 xy){
 }
 
 vec3 bgAt(vec2 p){
+  vec2 pv = p;              // pre-scroll: the DOM layer is viewport-pinned
   p.y += uScroll;
+  vec3 col;
   if (uCal > 0.5){
-    // calibration checkerboard: high contrast, big squares — refraction and
-    // reflection distortions become legible at a glance
     float ck = mod(floor(p.x*3.0) + floor(p.y*3.0), 2.0);
-    return mix(vec3(0.06,0.07,0.09), vec3(0.55,0.58,0.62), ck);
+    col = mix(vec3(0.06,0.07,0.09), vec3(0.55,0.58,0.62), ck);
+  } else {
+    float st = smoothstep(0.35,0.65, fract(p.x*3.0));
+    col = mix(vec3(0.055,0.075,0.10), vec3(0.10,0.14,0.18), st);
+    vec2 g = fract(p*14.0)-0.5;
+    col += smoothstep(0.16,0.10,length(g))*vec3(0.10,0.30,0.36);
+    col += vec3(0.02,0.03,0.045)*(fract(p.y*0.25)+0.5);
   }
-  float st = smoothstep(0.35,0.65, fract(p.x*3.0));
-  vec3 col = mix(vec3(0.055,0.075,0.10), vec3(0.10,0.14,0.18), st);
-  vec2 g = fract(p*14.0)-0.5;
-  col += smoothstep(0.16,0.10,length(g))*vec3(0.10,0.30,0.36);
-  col += vec3(0.02,0.03,0.045)*(fract(p.y*0.25)+0.5);
+  // The DOM layer lives on the backdrop wall: any warped coordinate that
+  // lands on it — through refraction, reflection, frost — picks it up here.
+  if (uUIon > 0.5){
+    float asp = uTile.z/uTile.w;
+    vec2 uv = vec2((pv.x/asp + 1.0)*0.5, 1.0 - (pv.y + 1.0)*0.5);
+    if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))){
+      vec4 ui = texture(uUI, uv);
+      col = mix(col, ui.rgb, ui.a);
+    }
+  }
   return col;
 }
 vec3 bgBlur(vec2 p, float rad){
@@ -532,6 +556,56 @@ if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramI
 gl.useProgram(prog);
 const U = n => gl.getUniformLocation(prog, n);
 
+// ---- DOM layer -> backdrop texture ----------------------------------------
+// The #ui nodes are real DOM: this paints a faithful mirror of them (measured
+// rects + computed styles) into a texture the shader samples on the backdrop
+// wall, so they refract and reflect like any other scene content.
+const uiTex = gl.createTexture();
+function buildUI(){
+  const W = Math.max(1, document.documentElement.clientWidth);
+  const H = Math.max(1, document.documentElement.clientHeight);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  for (const el of document.querySelectorAll('#ui .uiel')){
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const rad = parseFloat(cs.borderRadius) || 0;
+    if (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)'){
+      x.fillStyle = cs.backgroundColor;
+      x.beginPath(); x.roundRect(r.left, r.top, r.width, r.height, Math.min(rad, r.height/2)); x.fill();
+      const bw = parseFloat(cs.borderWidth) || 0;
+      if (bw > 0){ x.strokeStyle = cs.borderColor; x.lineWidth = bw; x.stroke(); }
+    }
+    x.fillStyle = cs.color;
+    x.font = cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+    x.textBaseline = 'top';
+    try { x.letterSpacing = (parseFloat(cs.letterSpacing) || 0) + 'px'; } catch(e){}
+    const padL = parseFloat(cs.paddingLeft) || 0;
+    const padT = parseFloat(cs.paddingTop) || 0;
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize)*1.3;
+    const maxW = r.width - padL - (parseFloat(cs.paddingRight) || 0);
+    const words = (el.textContent || '').trim().split(/\s+/);
+    let line = '', y = r.top + padT;
+    for (const wd of words){
+      const test = line ? line + ' ' + wd : wd;
+      if (maxW > 40 && x.measureText(test).width > maxW && line){
+        x.fillText(line, r.left + padL, y); y += lh; line = wd;
+      } else line = test;
+    }
+    if (line) x.fillText(line, r.left + padL, y);
+  }
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, uiTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.uniform1i(U('uUI'), 1);
+}
+
 const SCENE = /blobs/.test(location.search);
 const CALM  = !SCENE && !/grid/.test(location.search);
 const COLS = 2, ROWS = Math.ceil(SETS.length/COLS);
@@ -582,6 +656,7 @@ function drawTiles(){
   size(2);
   gl.viewport(0,0,c.width,c.height);
   gl.uniform1f(U('uCal'), 0.0);
+  gl.uniform1f(U('uUIon'), 0.0);
   gl.enable(gl.SCISSOR_TEST);
   gl.uniform1f(U('uScroll'), scrollY/innerHeight*1.4);
   const tw = c.width/COLS, th = c.height/ROWS;
@@ -598,6 +673,7 @@ function drawScene(t){
   size(1);   // look-dev scene: dpr 1, the shading is the point, not the pixels
   gl.viewport(0,0,c.width,c.height);
   gl.uniform1f(U('uCal'), 0.0);
+  gl.uniform1f(U('uUIon'), 1.0);
   gl.uniform1f(U('uScroll'), scrollY/innerHeight*1.4);
   gl.uniform4f(U('uTile'), 0, 0, c.width, c.height);
   const forms = BLOBS.map(b => ({
@@ -613,6 +689,7 @@ function drawCal(){
   size(2);
   gl.viewport(0,0,c.width,c.height);
   gl.uniform1f(U('uCal'), 1.0);
+  gl.uniform1f(U('uUIon'), 0.0);
   gl.uniform1f(U('uScroll'), scrollY/innerHeight*1.4);
   gl.uniform4f(U('uTile'), 0, 0, c.width, c.height);
   setForms(CAL, CAL_K);
@@ -625,9 +702,11 @@ if (CALM){
   requestAnimationFrame(drawCal);
   drawCal();
 } else if (SCENE){
+  buildUI();
   const tick = ts => { drawScene(ts/1000); requestAnimationFrame(tick); };
   requestAnimationFrame(tick);
-  addEventListener('resize', ()=>drawScene(performance.now()/1000));
+  addEventListener('resize', ()=>{ buildUI(); drawScene(performance.now()/1000); });
+  addEventListener('load', buildUI);
 } else {
   const draw = ()=>drawTiles();
   addEventListener('resize', draw);
