@@ -392,6 +392,12 @@ vec3 reflScene(vec3 pos, vec3 dir, vec2 pref){
   // very grazing directions still soften toward the env: the head-on
   // projection is least trustworthy at the equator
   float w = 0.25 + 0.75*smoothstep(0.0, 0.12, abs(dir.z));
+  // EDGE AA FOR REFLECTED SILHOUETTES: fade by hit depth inside the neighbor.
+  // At a reflected object's fringe the ray merely clips its edge; the
+  // crossing dip gets narrower than the bracket step and hit/miss alternates
+  // against the step lattice — a moire fringe. Fading the shallow-hit band
+  // toward the env makes both alternatives converge to the same color.
+  w *= smoothstep(0.0, 0.035, -dS);
   return mix(worldAt(dir, pref), cheapShade(xy, n, MA, MB), w);
 }
 
