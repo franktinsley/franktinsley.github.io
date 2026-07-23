@@ -303,18 +303,35 @@ float castRay(vec3 pos, vec3 dir, float sgn, float s0, out vec2 xy){
   return -1.0;
 }
 
+// Analytically band-limited checker (iq's checkersGrad): integrates the
+// square wave over the pixel footprint, so sub-pixel cells settle to grey
+// instead of shimmering.
+float checkersGrad(vec2 p, vec2 w){
+  w = abs(w) + 1e-4;
+  vec2 i = 2.0*(abs(fract((p-0.5*w)*0.5)-0.5) - abs(fract((p+0.5*w)*0.5)-0.5))/w;
+  return 0.5 - 0.5*i.x*i.y;
+}
+// The background patterns are PROCEDURAL — no mipmaps — so every strongly
+// bent reflection/refraction used to point-sample them into moire. Each
+// pattern is band-limited by the warped coordinate's screen footprint
+// (derivatives of p AFTER all the optics), fading to its mean color as its
+// period goes sub-pixel.
 vec3 bgAt(vec2 p){
   p.y += uScroll;
+  vec2 dx = dFdx(p), dy = dFdy(p);
+  float fp = max(length(dx), length(dy));           // footprint in field units
   if (uCal > 0.5){
-    // calibration checkerboard: high contrast, big squares — refraction and
-    // reflection distortions become legible at a glance
-    float ck = mod(floor(p.x*3.0) + floor(p.y*3.0), 2.0);
+    float ck = checkersGrad(p*3.0, (abs(dx)+abs(dy))*3.0);
     return mix(vec3(0.06,0.07,0.09), vec3(0.55,0.58,0.62), ck);
   }
-  float st = smoothstep(0.35,0.65, fract(p.x*3.0));
+  float stFade = clamp(fp*3.0*2.0 - 0.15, 0.0, 1.0);
+  float st = mix(smoothstep(0.35,0.65, fract(p.x*3.0)), 0.5, stFade);
   vec3 col = mix(vec3(0.055,0.075,0.10), vec3(0.10,0.14,0.18), st);
   vec2 g = fract(p*14.0)-0.5;
-  col += smoothstep(0.16,0.10,length(g))*vec3(0.10,0.30,0.36);
+  float fpc = fp*14.0;                              // footprint in dot cells
+  float dotv = smoothstep(0.16 + 0.6*fpc, 0.10, length(g));
+  dotv = mix(dotv, 0.055, clamp(fpc*1.6 - 0.25, 0.0, 1.0));   // mean coverage
+  col += dotv*vec3(0.10,0.30,0.36);
   col += vec3(0.02,0.03,0.045)*(fract(p.y*0.25)+0.5);
   return col;
 }
