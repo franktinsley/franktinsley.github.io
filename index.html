@@ -3,8 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Frank Tinsley — real-time, end to end</title>
-<meta name="description" content="Technical artist & real-time engineer. 15+ years across shaders, tools, and XR. This page is a live SDF renderer.">
+<title>Frank Tinsley — real-time graphics engineer</title>
+<meta name="description" content="Real-time graphics engineer, 15+ years — interactive installations, shaders, and rendering engines. The background here is a live WebGL2 SDF renderer, not a video.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b1013'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%2345d6df' stroke-width='2.5'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#0b1013">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Frank Tinsley — real-time graphics engineer">
+<meta property="og:description" content="Real-time graphics engineer, 15+ years — interactive installations, shaders, and rendering engines. The background here is a live WebGL2 SDF renderer, not a video.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Frank Tinsley — real-time graphics engineer">
+<meta name="twitter:description" content="Real-time graphics engineer, 15+ years — interactive installations, shaders, and rendering engines. The background here is a live WebGL2 SDF renderer, not a video.">
 <style>
   :root{
     color-scheme: dark;
@@ -113,7 +121,7 @@
   .sub{ margin:18px 0 0; font:400 12px/1.5 var(--mono); letter-spacing:0.14em; text-transform:uppercase; color:var(--dim-on); }
   .lede{ margin:16px auto 0; max-width:52ch; font-size:17px; line-height:1.5; color:var(--copy); }
   .lede strong{ color:var(--ink); font-weight:600; }
-  .grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:52px; margin-top:10px; text-align:left; }
+  .grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:52px; margin-top:10px; text-align:left; }
   /* inset padding on plate-carried blocks (.cell/.row): buildStates measures the
      PADDED box for the glass, so this pulls the ink in from the plate edge —
      corner-roll clearance that costs no frame width and no inter-plate gap. */
@@ -160,7 +168,11 @@
     .grid{ grid-template-columns:1fr; gap:34px; }
     .grid .cell h3{ font-size:14.5px; margin-bottom:4px; }
     .grid .cell p{ font-size:12px; line-height:1.42; }
-    .rows{ gap:26px; }
+    /* 18px, not 26: state 3 carries SIX rows since the Independent 2023–now row
+       was added, and at 375x812 the 26px gap overflowed the viewport and collided
+       with the nameplate and readout. Gap is pure whitespace — cheaper to spend
+       than the 12px type, which is already at the floor. */
+    .rows{ gap:18px; }
     .rows .row{ flex-wrap:wrap; font-size:12px; line-height:1.35; gap:2px 8px; }
     .rows .row .co{ min-width:0; flex:0 0 auto; }
     .rows .row .yr{ margin-left:auto; }
@@ -185,7 +197,11 @@
     .grid .cell h3{ font-size:14px; }
     .grid .cell p{ font-size:11.5px; line-height:1.38; }
   }
-  @media (prefers-reduced-motion: reduce){ #scroll{height:auto} }
+  /* NOTE: do NOT collapse #scroll under prefers-reduced-motion. height:auto zeroed
+     the scroll range, so scrollTarget()'s max went negative, progress pinned at 0,
+     and every state but 0 stayed at opacity:0 — stranding that visitor on the hero
+     with no route to the work, the history, or the contact panel. A proper STATIC
+     reduced-motion fallback (states stacked in flow) is a v5 item. */
 </style>
 <script type="x-shader/x-chunk" id="fieldsrc">
 // v4: field() is the whole DEPTH STACK — dots (deepest) plus three background
@@ -356,7 +372,7 @@ vec3 field(vec2 sp, vec2 m, float scr){
   <div class="cell"><span class="k">STATE</span> <span class="v" id="r_state">01 / 05</span></div>
   <div class="cell"><span class="k">VIEW</span> <span class="v acc" id="r_dbg">render</span> <span class="k">(n)</span></div>
   <span class="spacer"></span>
-  <div class="cell opt"><span class="k">SDF</span> <span class="v">6-cell · smin</span></div>
+  <div class="cell opt"><span class="k">SDF</span> <span class="v" id="r_cells">6-cell · smin</span></div>
   <div class="cell opt"><span class="k">CUR</span> <span class="v" id="r_cur">x +0.00 y +0.00</span></div>
 </div>
 </div><!-- /#chrome -->
@@ -365,55 +381,69 @@ vec3 field(vec2 sp, vec2 m, float scr){
 <div class="stage">
   <!-- 0 Identity -->
   <section class="state" data-state="0">
-    <p class="eyebrow">Real-time, end to end</p>
-    <h1>Half artist, half engineer.<br>All real-time.</h1>
-    <p class="sub">Technical artist &amp; real-time engineer · 15+ years · shaders · tools · XR</p>
+    <p class="eyebrow">Real-time graphics engineer</p>
+    <h1>I build interactive systems<br>that put on a show.</h1>
+    <p class="sub">15+ years · installations · shaders · engines · Unity · Metal · GLSL</p>
   </section>
   <!-- 1 Method -->
   <section class="state" data-state="1">
-    <p class="eyebrow">The method</p>
-    <h1>I make real-time<br>ideas real.</h1>
-    <p class="lede">This page is one of them — everything behind this text is a signed-distance field,
-      solved per pixel in a single WebGL2 shader, full resolution every frame. Prototype broad and fast,
-      bank the win, then harden. <strong>AI didn't change how I work; it widened the blast radius</strong> —
-      and I still prove every result with a number.</p>
+    <p class="eyebrow">How I work</p>
+    <h1>This page is<br>the demo.</h1>
+    <p class="lede">Everything behind this text is one signed-distance field, solved per pixel at full
+      device resolution, every frame. Most of the time, making something more beautiful and making it
+      easier to use are the same change — that's the one I aim for. My judgment about that is visual: get
+      a rough version on screen early, look at it hard, change it, look again — then harden it until it
+      holds frame rate on the machine it actually ships on. AI makes that loop faster;
+      <strong>it doesn't do the judging</strong>. When I rebuilt Konami's System 573 on an FPGA I didn't
+      call it working because it looked right — I frame-diffed it against MAME until the output
+      matched.</p>
   </section>
   <!-- 2 Work -->
   <section class="state" data-state="2">
-    <p class="eyebrow">Recent work · three stacks, one method</p>
+    <p class="eyebrow">Recent work · screens, devices, rooms</p>
     <div class="grid">
-      <div class="cell"><h3>SDF modeling engine</h3><p>Production-grade signed-distance-field ray-marching
-        3D modeling engine in Swift + Metal — full shader stack, procedural geometry, marching-cubes export.
-        Real-time on iOS, iPadOS, macOS. ~50k lines, solo. <a href="#">demo on request</a></p></div>
-      <div class="cell"><h3>System 573 — FPGA</h3><p>FPGA re-implementation of Konami's PSX-based arcade
-        platform for MiSTer — ~22k lines of RTL in a month, proven frame-accurate against MAME on real
-        hardware. <a href="https://github.com/fabricore-eng/System573_MiSTer">github ↗</a></p></div>
-      <div class="cell"><h3>This renderer</h3><p>The SDF instrument you're looking at — one WebGL2 fragment
-        shader that morphs, refracts, and reacts to the cursor, at 120fps and full resolution.</p></div>
+      <div class="cell"><h3>SDF modeling engine — Swift + Metal</h3><p>A real-time signed-distance-field
+        ray-marching 3D modeler — the whole shader stack, smooth booleans, procedural geometry,
+        marching-cubes export to STL/OBJ. Interactive frame rates on iOS, iPadOS and macOS.
+        ~50,000 lines across ~650 commits, built solo. <a href="mailto:franktinsley@me.com?subject=SDF%20engine%20demo">demo on request</a></p></div>
+      <div class="cell"><h3>Konami System 573 — FPGA core</h3><p>A working FPGA re-implementation of
+        Konami's PSX-based arcade platform for MiSTer — ~22,000 lines of RTL in about a month, in a domain
+        I had no background in. AI-accelerated workflow, verified frame-accurate against MAME by automated
+        frame-diff on real hardware, not by eye.
+        <a href="https://github.com/fabricore-eng/System573_MiSTer">source ↗</a></p></div>
+      <div class="cell"><h3>This page</h3><p>The background you're reading over: one signed-distance field,
+        no textures and no libraries, tracking your cursor or your finger at full device resolution. Two
+        WebGL2 programs draw it — one scrolls, one is pinned — sharing the field function verbatim so the
+        seam doesn't exist. Live frame counter in the readout.</p></div>
+      <div class="cell"><h3>Retail installations — Unity</h3><p>Interactive 3D built to run unattended in
+        physical space — a real shoe with an Arduino inside it driving a live render shoppers rotated in
+        their hands; a body-tracked multiplayer race on a large-format screen; a touch-to-clear frost wall
+        revealing a life-size underwater scene. Creative and technical, end to end.</p></div>
     </div>
   </section>
   <!-- 3 Experience -->
   <section class="state" data-state="3">
-    <p class="eyebrow">The depth behind it · 15+ years</p>
+    <p class="eyebrow">15+ years · installations to avatars</p>
     <div class="rows">
-      <div class="row"><span class="co">Meta</span><span class="desc">Technical Artist on Meta Avatars — real-time interactivity &amp; rendering; built an in-editor tool to drive and test the live-avatar systems.</span><span class="yr">2025–26</span></div>
-      <div class="row"><span class="co">Meta</span><span class="desc">AR subject-matter expert for Spark AR; built curriculum for the next generation of AR creators.</span><span class="yr">2022–23</span></div>
-      <div class="row"><span class="co">Microsoft</span><span class="desc">Mixed Reality developer.</span><span class="yr">2021–22</span></div>
-      <div class="row"><span class="co">Camera IQ</span><span class="desc">Built the platform's AR runtimes (C#, JS, Go) and created ARX, an API-neutral AR interchange format.</span><span class="yr">2018–20</span></div>
-      <div class="row"><span class="co">CodeStep</span><span class="desc">Nine years of interactive Unity work — mobile, XR, and branded retail installations shown worldwide.</span><span class="yr">2009–18</span></div>
+      <div class="row"><span class="co">Independent</span><span class="desc">The SDF engine and the System 573 core. Solo, end to end.</span><span class="yr">2023–now</span></div>
+      <div class="row"><span class="co">Meta</span><span class="desc">Technical Artist on Meta Avatars — real-time interactivity and rendering. Built a visual in-editor tool for authoring mock events and driving them at runtime, so the live-avatar systems could be tested behaviorally.</span><span class="yr">2025–26</span></div>
+      <div class="row"><span class="co">Meta</span><span class="desc">Meta's subject-matter expert on Spark AR — wrote the hands-on activities and tutorials for a curriculum training new AR creators.</span><span class="yr">2022–23</span></div>
+      <div class="row"><span class="co">Microsoft</span><span class="desc">Mixed Reality developer, remote.</span><span class="yr">2021–22</span></div>
+      <div class="row"><span class="co">Camera IQ</span><span class="desc">Built the platform's AR runtimes and the backend behind them — C# for Unity, then JavaScript, then Java and Go. Created ARX, an API-neutral format for moving AR experiences between runtimes like Lens Studio and Spark AR.</span><span class="yr">2018–20</span></div>
+      <div class="row"><span class="co">CodeStep</span><span class="desc">My own consultancy. Interactive Unity work for mobile, XR and branded retail — sensor- and touch-driven installations that ran unattended in stores and at trade shows worldwide. Creative and technical, end to end.</span><span class="yr">2009–18</span></div>
     </div>
   </section>
   <!-- 4 Contact -->
   <section class="state" data-state="4">
-    <p class="eyebrow">Let's build something</p>
-    <h1>Real-time ideas,<br>made real.</h1>
+    <p class="eyebrow">Get in touch</p>
+    <h1>Send me<br>the hard part.</h1>
     <div class="links">
       <a href="mailto:franktinsley@me.com">franktinsley@me.com</a>
       <a href="https://linkedin.com/in/franktinsley">LinkedIn</a>
       <a href="assets/resume.pdf">Résumé</a>
-      <a href="https://github.com/fabricore-eng/System573_MiSTer">GitHub</a>
+      <a href="https://github.com/franktinsley">GitHub</a>
     </div>
-    <p class="place">Portland, OR — open to the Bay Area or remote</p>
+    <p class="place">Portland, Oregon — onsite or hybrid here, remote anywhere.</p>
   </section>
 </div>
 
@@ -448,9 +478,31 @@ void main(){
 
 <script type="x-shader/x-fragment" id="frag">#version 300 es
 precision highp float;
+// NCELL — the ONE cell-count constant. It is NOT written here: the page's single
+// `const NCELL` (see withField() in the main script) injects `const int NCELL = N;`
+// over this marker at compile time, so the GLSL array sizes / loop bounds and the
+// JS state builder, spring, compCells and upload can never disagree. Everything
+// below derives from it; there are no literal cell counts left in this shader.
+//__NCELL__
 uniform vec2  uRes;
 uniform float uTime;
-uniform vec4  uCells[6];   // xy = center, zw = half-size (y-normalized units)
+uniform vec4  uCells[NCELL];   // xy = center, zw = half-size (y-normalized units)
+// How many of those cells are DISTINCT this frame. NCELL is the budget; uN is the
+// bill. Every state pads its cell list out to NCELL by repeating its last form, so
+// the tail is always an exact duplicate run — and folding an exact duplicate does
+// exactly one thing to the field: it subtracts the smin self-inflation -uK/4. That
+// is the same constant compCells() removes on the CPU, from the same uN, in the
+// same frame, so shortening the fold here cannot move the drawn silhouette by so
+// much as a sub-pixel. What it does do is stop the single-form states (identity,
+// method, contact — one box, NCELL copies of it) paying NCELL times for one shape.
+// uN is a UNIFORM, so `if (i >= uN) break` is coherent across every thread in
+// flight — no divergence, the work is genuinely skipped rather than masked off.
+// Measured on an M1 Pro at 3.7 Mpx, full-canvas, same pixels: folding 1 cell
+// instead of 6 takes the glass draw from 3.57 ms to 2.15 ms. The alternative
+// spelling — a constant-bound loop with the body wrapped in `if (i < uN)` —
+// was tried and is WORSE: the compiler predicates it (computes every cell, then
+// selects), so uN=1 still cost 4.19 ms. The early-out is the version that skips.
+uniform int   uN;
 uniform float uCorner;
 uniform float uK;          // smin blend radius
 uniform float uScroll;     // dot-field scroll offset, p-units (see SCROLL_K)
@@ -528,8 +580,9 @@ float soapShoulder(float q, float w, out float ds){
   return w*t2*t2*(2.5 + t*(-3.0 + t));        // w*sig(t)
 }
 // C3 compact-support smin blend. Self-inflation at coincidence is -uK/4 per fold
-// (first fold only; the 5-fold chain totals 0.5563k — compCells() in the page JS
-// runs THIS recurrence against the live cells/k to cancel the growth exactly).
+// (first fold only; the NCELL-1 fold chain totals 0.5563k at NCELL=6, 0.6244k at
+// NCELL=8 — compCells() in the page JS runs THIS recurrence, over the same uN
+// cells, against the live cells/k to cancel the growth exactly).
 float sqPhi(float u, out float dphi){
   if (u >= 1.0){ dphi = 0.0; return 0.0; }
   if (u <= -1.0){ dphi = 1.0; return u; }
@@ -601,7 +654,8 @@ float soapDist(vec2 p, float px, out float mnc, out float wBlob){
   soapCell(0, p, px, c4, a4, Rc, gxy, th4, mncell);
   float g = sqrt(sqrt(max(c4, 0.0))) - Rc;
   mnc = mncell;
-  for (int i = 1; i < 6; i++){
+  for (int i = 1; i < NCELL; i++){
+    if (i >= uN) break;
     soapCell(i, p, px, c4, a4, Rc, gxy, th4, mncell);
     float fi = sqrt(sqrt(max(c4, 0.0))) - Rc;
     float dph; g += uK*sqPhi((fi - g)/uK, dph);
@@ -632,13 +686,23 @@ float soapDist(vec2 p, float px, out float mnc, out float wBlob){
 // stalls AT the already-exact seed where the blob dominates its own silhouette —
 // graceful, never divergent.
 float soapSolve(vec2 p, float px, out vec3 nrm){
-  float c4[6]; float a4[6]; float Rc[6]; vec2 gxy[6]; float th4[6]; float mncell;
+  // These per-cell arrays are the whole register budget of this function: the
+  // compiler unrolls every loop below (constant bounds), so each element is a
+  // live register from the seed loop to the gradient fold. th4 and mn are read
+  // only inside the iteration that writes them, so they are SCALARS — holding
+  // them per-cell cost 2*NCELL registers for nothing, and at NCELL=8 that was
+  // enough extra pressure to halve throughput (measured: 4.4 -> 8.9 ms/draw at
+  // 4.68 Mpx, i.e. off the 120Hz vsync lock). Anything added here pays that
+  // same NCELL-times price; keep the cached set minimal.
+  float c4[NCELL]; float a4[NCELL]; float Rc[NCELL]; vec2 gxy[NCELL];
+  float th4i, mncell;
   float zeta = 0.0, zcap = 0.0;
-  for (int i = 0; i < 6; i++){
-    soapCell(i, p, px, c4[i], a4[i], Rc[i], gxy[i], th4[i], mncell);
+  for (int i = 0; i < NCELL; i++){
+    if (i >= uN) break;
+    soapCell(i, p, px, c4[i], a4[i], Rc[i], gxy[i], th4i, mncell);
     float R2 = Rc[i]*Rc[i], R4 = R2*R2;
     zeta = max(zeta, (R4 - c4[i])/a4[i]);    // exact single-cell root
-    zcap = max(zcap, 16.0*th4[i]);           // (2*TH)^4 — union bulge is < 2*TH
+    zcap = max(zcap, 16.0*th4i);             // (2*TH)^4 — union bulge is < 2*TH
   }
   float bC = 0.0, bR = 0.0, bMn = 0.0; vec2 bG = vec2(0.0);
   bool blob = uBlobOn > 0.0;
@@ -654,7 +718,8 @@ float soapSolve(vec2 p, float px, out vec3 nrm){
     float t0 = pow(max(c4[0] + a4[0]*zeta, 0.0), 0.25);
     float g  = t0 - Rc[0];
     float dg = 0.25*a4[0]/max(t0*t0*t0, 1e-18);
-    for (int i = 1; i < 6; i++){
+    for (int i = 1; i < NCELL; i++){
+      if (i >= uN) break;
       float ti  = pow(max(c4[i] + a4[i]*zeta, 0.0), 0.25);
       float fi  = ti - Rc[i];
       float dfi = 0.25*a4[i]/max(ti*ti*ti, 1e-18);
@@ -678,7 +743,8 @@ float soapSolve(vec2 p, float px, out vec3 nrm){
   float i3 = 1.0/max(t0*t0*t0, 1e-18);
   float g  = t0 - Rc[0];
   vec3  G  = vec3(gxy[0], a4[0]*z3)*i3;
-  for (int i = 1; i < 6; i++){
+  for (int i = 1; i < NCELL; i++){
+    if (i >= uN) break;
     float ti  = pow(max(c4[i] + a4[i]*zeta, 0.0), 0.25);
     float ii3 = 1.0/max(ti*ti*ti, 1e-18);
     float fi  = ti - Rc[i];
@@ -1730,6 +1796,27 @@ if (document.fonts && document.fonts.load) {
 }
 </script>
 <script>
+// ---- NCELL: the ONE cell-count constant -------------------------------------
+// How many union cells a single state may spend. This number used to be the
+// literal 6 in fourteen places (the uniform decl, four GLSL loops + five GLSL
+// local array sizes, and seven JS loops/allocations), and buildStates()' fill()
+// SILENTLY SLICED anything past the last slot — so adding page content made
+// panels render with no glass and threw no error. Both of those bugs were live:
+// a 4th work card and a 6th history row each had to steal a slot from the label
+// plates to get glass at all. Everything now derives from THIS declaration —
+// the shader gets it by injection (see withField below), the page JS reads it
+// directly — so widening the site's content is a one-token change here.
+//
+// Cost is linear per cell in the fragment shader (the soapCell setup runs
+// NCELL times in soapDist and three times more inside soapSolve's Newton /
+// gradient folds), so this is a budget, not a free-for-all: measure the glass
+// draw cost before raising it. Measured on an M1 Pro at 4.68 Mpx full-canvas,
+// 6 -> 8 cost +0.68 ms/draw on the busiest state while whole-document scroll
+// stayed vsync-locked (median 8.3 ms / p95 10.5 ms, unchanged).
+const NCELL = 8;
+// the readout label is DERIVED, not typed: it read "6-cell" for a while after
+// NCELL went to 8, which is exactly the kind of drift this constant exists to stop.
+{const e=document.getElementById('r_cells'); if(e) e.textContent=NCELL+'-cell · smin';}
 const canvas=document.getElementById('gl');
 // The canvas's own measured rect — the single source for the drawing buffer, the
 // cell mapping (Rr) and the pointer mapping. Declared HERE, beside the element,
@@ -1751,7 +1838,14 @@ gl.attachShader(prog,sh(gl.VERTEX_SHADER,VERT));
 // Both programs splice in ONE field() definition. Two copies of that function would
 // drift apart on the next edit, and a drift is a visible seam between the canvases.
 const FIELD_SRC=document.getElementById('fieldsrc').textContent;
-const withField=id=>document.getElementById(id).textContent.replace('//__FIELD__',FIELD_SRC);
+// ...and the same splice point carries NCELL into the GLSL, so the shader's array
+// sizes and loop bounds are the SAME number the page JS builds states with. A
+// `const int` is a constant expression in GLSL ES 3.00, so it is legal as an array
+// size. #bgfrag has no //__NCELL__ marker (it draws no cells); the replace is a
+// no-op there, exactly like a shader with no //__FIELD__ marker would be.
+const withField=id=>document.getElementById(id).textContent
+  .replace('//__FIELD__',FIELD_SRC)
+  .replace('//__NCELL__','const int NCELL = '+NCELL+';');
 gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,withField('frag')));
 gl.linkProgram(prog);
 if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ fail(gl.getProgramInfoLog(prog)); throw new Error('link'); }
@@ -1760,7 +1854,7 @@ const U=n=>gl.getUniformLocation(prog,n);
 // uLight is RETIRED (v4.5: the key light is the shader const KEY_L — one sun,
 // not a knob). The lookup stays (null) so tests/glass-zoom.js's unguarded
 // uniform3f(uLight,...) remains a legal no-op instead of a ReferenceError.
-const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
+const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
   uMatA=U('uMatA[0]'),uMatB=U('uMatB[0]'),uMatBlob=U('uMatBlob[0]'),uBlobU=U('uBlob'),uBlobOn=U('uBlobOn'),uBlobPh=U('uBlobPh'),uContact=U('uContact'),uSpreadT=U('uSpreadT'),uProgG=U('uProg'),uBgInkAg=U('uBgInkA'),uBgInkBg=U('uBgInkB'),uBgMixG=U('uBgMix');
 gl.enable(gl.BLEND);
 gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -1997,46 +2091,68 @@ function Rtext(el, px, py){
   const rng=document.createRange(); rng.selectNodeContents(el);
   return Rr(rng.getBoundingClientRect(), px, py);
 }
-// The smin fold is NOT idempotent — smin(a,a,k) = a - k/4 — so unioning six
-// coincident cells subtracts a constant from the whole field five times over, and
-// a constant offset on an SDF moves its zero crossing: the drawn silhouette
-// inflates outward past the measured boxes. At k=0.16 that is ~0.56k, i.e. ~42px
-// on a phone, which is how a form measured to sit inside the bezel ended up drawn
-// past it. Two historical bugs live in this story (v4.6): (1) the old build-time
-// rep() shrink ran the OLD polynomial-smin recurrence (0.6008k over five folds)
-// while the shader folds with sqPhi (0.5563k) — the -k/4 constant matches only
-// for the FIRST fold — so every fused card rendered ~2-3 css px inside its
-// measured box; (2) a build-time constant can only be right for ONE k, but the
-// live k is cur.k + the mid-morph GOO bump (+0.085), whose extra chain growth
-// (~13 css px at w320) pushed the morphing card through the bezel frame.
+// The smin fold is NOT idempotent — smin(a,a,k) = a - k/4 — so unioning NCELL
+// coincident cells subtracts a constant from the whole field NCELL-1 times over,
+// and a constant offset on an SDF moves its zero crossing: the drawn silhouette
+// inflates outward past the measured boxes. At k=0.16 that is ~0.62k (NCELL=8),
+// i.e. ~47px on a phone, which is how a form measured to sit inside the bezel
+// ended up drawn past it. Two historical bugs live in this story (v4.6): (1) the
+// old build-time rep() shrink ran the OLD polynomial-smin recurrence (0.6008k
+// over five folds) while the shader folds with sqPhi (0.5563k over five) — the
+// -k/4 constant matches only for the FIRST fold — so every fused card rendered
+// ~2-3 css px inside its measured box; (2) a build-time constant can only be
+// right for ONE k, but the live k is cur.k + the mid-morph GOO bump (+0.085),
+// whose extra chain growth (~13 css px at w320) pushed the morphing card through
+// the bezel frame.
 // Fix: compensate at DRAW time instead — compCells() below runs the shader's own
 // sqPhi recurrence at each cell's four edge midpoints against the LIVE cells and
 // LIVE k, and shrinks that cell axis by exactly the outward push the fold chain
-// is about to add there. Exact at coincidence (reduces to the closed 5-fold
+// is about to add there. Exact at coincidence (reduces to the closed NCELL-1 fold
 // chain), correct through the goo bump, and it also compensates the ~k/4 growth
 // on separated plates (incl. the duplicated fill() cells) that rep() ignored.
+// BOTH halves run over the SAME n the shader folds with (uN, = liveN(cur.cells)),
+// and that is the load-bearing invariant of this whole file: the cap is the chain
+// growth of exactly n coincident cells, so a cap computed over a different chain
+// length than the shader's would mis-shrink every single-form state. n in, n out.
 function sqPhiJS(u){                           // = the shader's sqPhi (value only)
   if (u >= 1) return 0;
   if (u <= -1) return u;
   const w = u*u - 1;
   return 0.5*u + (-0.5 + w*(-0.25 + w*(0.0625 + w*(-0.03125 + w*(-0.09375)))));
 }
-function repGrowth(k){                         // coincident-chain growth (the cap)
+function repGrowth(k, n){                      // coincident-chain growth (the cap)
   let g = 0;
-  for (let i = 1; i < 6; i++) g += k*sqPhiJS((0 - g)/k);
+  for (let i = 1; i < n; i++) g += k*sqPhiJS((0 - g)/k);
   return -g;
 }
-// cells: [ [cx,cy,hx,hy] x6 ] intent boxes; out: Float32Array(24) to upload.
+// How many leading cells are DISTINCT — the count the shader's uN gets, and the
+// count every compensation below must run over. Every state pads to NCELL by
+// repeating its last form and the spring preserves that (equal inputs, equal
+// float ops, equal outputs), so the duplicates are always a TRAILING run: scan
+// back for the last cell that differs from the one before it. The tolerance is
+// there only to catch spring residuals — a pair that has converged to within
+// 1e-5 y-normalized units is 4e-3 css px apart on an 800px-tall canvas, i.e.
+// two cells the renderer could not draw differently if it tried.
+const CELL_EPS = 1e-5;
+function liveN(cells){
+  for (let i = NCELL-1; i > 0; i--){
+    const a = cells[i], b = cells[i-1];
+    if (Math.abs(a[0]-b[0]) > CELL_EPS || Math.abs(a[1]-b[1]) > CELL_EPS ||
+        Math.abs(a[2]-b[2]) > CELL_EPS || Math.abs(a[3]-b[3]) > CELL_EPS) return i+1;
+  }
+  return 1;
+}
+// cells: [ [cx,cy,hx,hy] x NCELL ] intent boxes; out: Float32Array(NCELL*4).
 // Per cell, probe the sqPhi fold chain at the 4 edge midpoints (rect-distance
 // per cell — exact along the axes the probes sit on) and shrink hx/hy by the
 // worst outward push, capped at the coincident-chain growth: a probe swallowed
 // INSIDE another cell reports containment depth, not edge growth, and that cell
 // no longer defines the union edge there — the cap keeps its shrink harmless.
-function compCells(cells, k, out){
-  const cap = repGrowth(k);
+function compCells(cells, k, n, out){
+  const cap = repGrowth(k, n);
   const push = (pX, pY) => {
     let g = 0;
-    for (let i = 0; i < 6; i++){
+    for (let i = 0; i < n; i++){
       const c = cells[i];
       const qx = Math.abs(pX - c[0]) - c[2], qy = Math.abs(pY - c[1]) - c[3];
       const f = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0);
@@ -2044,7 +2160,9 @@ function compCells(cells, k, out){
     }
     return Math.min(Math.max(-g, 0), cap);     // outward push at this probe
   };
-  for (let i = 0; i < 6; i++){
+  // still writes ALL NCELL slots — the shader only reads the first n, but leaving
+  // the tail stale would hand a future n a buffer from an older frame.
+  for (let i = 0; i < NCELL; i++){
     const c = cells[i];
     const sx = Math.max(push(c[0]-c[2], c[1]), push(c[0]+c[2], c[1]));
     const sy = Math.max(push(c[0], c[1]-c[3]), push(c[0], c[1]+c[3]));
@@ -2053,7 +2171,10 @@ function compCells(cells, k, out){
     out[i*4+3] = Math.max(c[3] - sy, 0.004);
   }
 }
-const six=c=>[c,c,c,c,c,c];   // one form: all 6 cells coincident (intent box, unshrunk)
+// one form: all NCELL cells coincident on the same intent box (unshrunk). The
+// repeated entries are deliberately the SAME array object, as they always were —
+// nothing mutates a STATES cell in place (cur.cells is a .slice() copy).
+const oneForm=c=>new Array(NCELL).fill(c);
 let STATES=[];
 let builtH=0;   // layout-viewport height the current STATES geometry was measured at (?diag)
 function buildStates(){
@@ -2084,29 +2205,52 @@ function buildStates(){
   // persists across the 2→3 morph instead of necking out of a panel.
   // a touch of extra height on the plate so its label clears the density ramp
   const eyeb = i => Rtext(secs[i].querySelector('.eyebrow'), mob?13:17, mob?9:12);
-  const fill=(a)=>{ a=a.slice(); while(a.length<6) a.push(a[a.length-1]); return a.slice(0,6); };
+  // pad a state's real forms out to NCELL by repeating the LAST one (coincident
+  // duplicates are free geometry — compCells cancels their fold growth), then
+  // slice. The slice is the silent-truncation edge the cell-count bug rode in on:
+  // it is kept as a hard guarantee that the uploaded buffer is exactly NCELL*4
+  // long, but a state that OVERFLOWS it now says so instead of losing a panel.
+  const fill=(a)=>{ a=a.slice();
+    if(a.length>NCELL) console.warn('[cells] state needs '+a.length+' > NCELL='+NCELL+'; raise NCELL — '+(a.length-NCELL)+' form(s) would render with no glass');
+    while(a.length<NCELL) a.push(a[a.length-1]); return a.slice(0,NCELL); };
   // kSettle: near-zero for SEPARATED states so panels/rows end up genuinely
   // distinct at rest; the gooey necking happens only mid-morph (GOO bump below).
   // corner values survive as a LOWER bound only: the soap family's roll radius
   // (0.55*mn per cell) IS the corner and dominates every value below, so these
   // mostly document intent now. Raising one above 0.55*min(halfsize) would
   // widen that cell's corner further; it can never pinch.
+  // Slot budget, NCELL = 8. Every state fills all NCELL slots; a state with fewer
+  // real forms repeats its LAST one, which is close to free — coincident cells fold
+  // to the same surface, uN stops the shader folding them at all, and compCells
+  // cancels whatever growth is left. What DOES matter is that slot i of state n
+  // morphs into slot i of state n+1:
+  //
+  //  slot  |   0    1    2    3      4        5        6        7
+  //  st 2  | item0 item1 item2 item3 eyeb(2) eyeb(2)* eyeb(2)* eyeb(2)*   -> 5 distinct
+  //  st 3  | rows0 rows1 rows2 rows3 rows4   rows5    eyeb(3)  eyeb(3)*   -> 7 distinct
+  //                                          (* = coincident duplicate from fill)
+  // Slots 6/7 hold a label plate on BOTH sides, so the eyebrow plate travels plate
+  // -> plate across the 2->3 morph rather than necking out of a content panel —
+  // which is the whole reason the plate has its own cell. Slots 4/5 start as
+  // coincident copies of state 2's plate and separate out of it into the last two
+  // timeline rows; they are the only cells that gain a form across the morph, and
+  // starting them ON an existing form is what keeps them from popping into being.
   STATES=[
-    {cells:six(R(secs[0], mob?14:46, clear(mob?30:40))), k:0.16, corner:0.15},   // identity — lens
-    {cells:six(R(secs[1], mob?16:40, clear(mob?30:34))), k:0.16, corner:0.15},   // method — card
-    {cells:fill([items[0],items[1],items[2],eyeb(2),items[0],items[1]]), k:0.005, corner:0.06}, // work — 3 SEPARATE panels + label plate
-    {cells:fill([rows[0],rows[1],rows[2],eyeb(3),rows[3],rows[4]]), k:0.006, corner:0.05},      // experience — SEPARATE rows + label plate
-    {cells:six(R(secs[4], mob?14:40, clear(mob?28:34))), k:0.16, corner:0.16},   // contact — card
+    {cells:oneForm(R(secs[0], mob?14:46, clear(mob?30:40))), k:0.16, corner:0.15},   // identity — lens
+    {cells:oneForm(R(secs[1], mob?16:40, clear(mob?30:34))), k:0.16, corner:0.15},   // method — card
+    {cells:fill([items[0],items[1],items[2],items[3],eyeb(2)]),             k:0.005, corner:0.06}, // work — 4 SEPARATE panels + label plate
+    {cells:fill([rows[0],rows[1],rows[2],rows[3],rows[4],rows[5],eyeb(3)]), k:0.006, corner:0.05}, // experience — SIX SEPARATE rows + label plate
+    {cells:oneForm(R(secs[4], mob?14:40, clear(mob?28:34))), k:0.16, corner:0.16},   // contact — card
   ];
 }
 buildStates();
 
 // spring-smoothed live cell params
 let cur={ cells:STATES[0].cells.map(c=>c.slice()), k:STATES[0].k, corner:STATES[0].corner };
-const cellBuf=new Float32Array(24);
+const cellBuf=new Float32Array(NCELL*4);   // exactly what uniform4fv(uCells,...) uploads
 function lerpState(a,b,t){
   const out={cells:[],k:a.k+(b.k-a.k)*t,corner:a.corner+(b.corner-a.corner)*t};
-  for(let i=0;i<6;i++){ const A=a.cells[i],B=b.cells[i]; out.cells.push([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t,A[3]+(B[3]-A[3])*t]); }
+  for(let i=0;i<NCELL;i++){ const A=a.cells[i],B=b.cells[i]; out.cells.push([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t,A[3]+(B[3]-A[3])*t]); }
   return out;
 }
 const ease=x=>x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
@@ -2230,10 +2374,37 @@ function moved(nx,ny){
   const marg=10*dpr;                       // minor-movement margin (~10 css px)
   if((nx-activeX)**2+(ny-activeY)**2 > marg*marg){ activeX=nx; activeY=ny; lastActive=performance.now(); }
 }
-addEventListener('pointermove',e=>{ const nx=(e.clientX-GLR.left)*dpr, ny=(GLR.height-(e.clientY-GLR.top))*dpr; moved(nx,ny); mx=nx; my=ny; },{passive:true});
+// One mapping, used by every input path: viewport css px -> this canvas's device
+// px, y flipped because GL's origin is bottom-left. #gl is position:fixed, so GLR
+// stays valid while the document scrolls under it — the finger's SCREEN position
+// is what the field wants, not its document position.
+const toField=(cx,cy)=>[(cx-GLR.left)*dpr, (GLR.height-(cy-GLR.top))*dpr];
+function track(cx,cy){ const [nx,ny]=toField(cx,cy); moved(nx,ny); mx=nx; my=ny; }
+function jump(cx,cy){ const [nx,ny]=toField(cx,cy); activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; }
+addEventListener('pointermove',e=>track(e.clientX,e.clientY),{passive:true});
 // touch/tap (or mouse press): jump the focal to the touch point and go active,
 // so tapping the screen moves the reactive glow there even without a drag
-addEventListener('pointerdown',e=>{ const nx=(e.clientX-GLR.left)*dpr, ny=(GLR.height-(e.clientY-GLR.top))*dpr; activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; },{passive:true});
+addEventListener('pointerdown',e=>jump(e.clientX,e.clientY),{passive:true});
+// ---- TOUCH: why the pointer listeners above are not enough on a phone --------
+// A Pointer Event stream DIES at the start of a scroll. As soon as the browser
+// decides a touch is a scroll gesture it takes the pointer for itself: it fires
+// pointercancel and never sends another pointermove for that finger. Measured on
+// this page with a synthetic 500px drag: pointerdown x1, pointermove x1,
+// pointercancel x1, then silence — while touchmove kept firing the whole way
+// down. So the focal froze 917 device px behind the finger the moment the page
+// started moving, which is exactly the "the scroll swallows the touch" symptom:
+// the dot grid stopped reacting where the user was actually touching.
+//
+// Touch Events are the input stream that SURVIVES the scroll, so mirror them.
+// Both listeners are passive and neither calls preventDefault: this page is
+// scroll-driven, the gesture belongs to the browser, and all we do is observe
+// where the finger is. Registering them passive is also what guarantees we can
+// never become a scroll-blocking listener by accident.
+// The pointer path still runs for mice/trackpads and for the first instant of a
+// touch; both write the same two numbers from the same mapping, so the overlap
+// is idempotent rather than a conflict.
+addEventListener('touchstart',e=>{ const t=e.touches[0]; if(t) jump(t.clientX,t.clientY); },{passive:true});
+addEventListener('touchmove', e=>{ const t=e.touches[0]; if(t) track(t.clientX,t.clientY); },{passive:true});
 const sgn=v=>(v<0?'−':'+')+Math.abs(v).toFixed(2);
 
 const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2259,15 +2430,20 @@ function loop(now){
   // spring the live params toward target (frost-like smoothing)
   const sp=reduced?1:0.16;
   cur.k+=(tgt.k-cur.k)*sp; cur.corner+=(tgt.corner-cur.corner)*sp;
-  for(let i=0;i<6;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]+=(tgt.cells[i][j]-cur.cells[i][j])*sp; } }
+  for(let i=0;i<NCELL;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]+=(tgt.cells[i][j]-cur.cells[i][j])*sp; } }
   // goo bump: add blend only mid-morph, so forms neck/flow while transitioning
   // but end up genuinely separate (k -> its small settle value) at rest.
   // Computed HERE (not at upload) because compCells must see the same k the
   // shader folds with — the bump's extra chain growth is part of what it undoes.
   const kLive = cur.k + 0.085*morphAmt;
+  // nLive: how many cells are actually distinct after this frame's spring step.
+  // Derived from cur.cells (not from the target) so it can never under-count a
+  // still-separating pair mid-spring, and read ONCE here so the CPU compensation,
+  // the scissor margin and the shader all fold the identical chain this frame.
+  const nLive = liveN(cur.cells);
   // cur.cells are INTENT boxes; the buffer gets the fold-chain-compensated
   // cells so the drawn silhouette lands on the intent (see compCells).
-  compCells(cur.cells, kLive, cellBuf);
+  compCells(cur.cells, kLive, nLive, cellBuf);
   // follow the cursor while active; when idle past IDLE_MS, ease back to center
   // (slower rate) so the parallax + swell settle to the default resting pose
   const active=(now-lastActive)<IDLE_MS;
@@ -2327,25 +2503,28 @@ function loop(now){
   gl.uniform2fv(uContact, TS.contact); gl.uniform1f(uSpreadT, TS.spreadT);
   gl.uniform1f(uProgG, TS.prog);
   gl.uniform4fv(uBgInkAg, TS.bgA); gl.uniform4fv(uBgInkBg, TS.bgB); gl.uniform1f(uBgMixG, TS.bgMix);
-  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive);
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive);
   // ---- SCISSOR #gl to the glass bbox (v4.3 perf; the v3-handoff lever). ----
   // Everything this program draws — glass body + rim + contact shadow — lives
   // inside the union of the drawn cells and the blob; every pixel outside it
-  // still paid the 6-cell smin + blob field just to output alpha 0. Clip the
+  // still paid the NCELL-cell smin + blob field just to output alpha 0. Clip the
   // DRAW to the bbox and those pixels cost nothing. The CLEAR stays full-canvas
   // (scissor off), so pixels the bbox just left are wiped, never stale.
-  // Margin: smin can push the silhouette outward ~0.6·k past the cells (the
-  // repGrowth analysis), the contact shadow reaches 0.06 past d=0, the rim
-  // line ~0.009, plus the parallax offset and an AA cushion.
+  // Margin: smin can push the silhouette outward by the coincident fold-chain
+  // growth past the cells — repGrowth(kLive,nLive), which is ~0.556·k over 6 folded
+  // cells and ~0.624·k over 8, so it is TAKEN FROM repGrowth rather than hardcoded
+  // (a fixed 0.6·k would start clipping the rim the moment a state folded 7). Plus the
+  // contact shadow's reach of 0.06 past d=0, the rim line ~0.009, the parallax
+  // offset and an AA cushion.
   // Debug views paint the whole field, so they draw unclipped.
   let bbx0=1e9,bbx1=-1e9,bby0=1e9,bby1=-1e9;
-  for(let i=0;i<6;i++){ const c=cur.cells[i];
+  for(let i=0;i<NCELL;i++){ const c=cur.cells[i];
     if(c[0]-c[2]<bbx0)bbx0=c[0]-c[2]; if(c[0]+c[2]>bbx1)bbx1=c[0]+c[2];
     if(c[1]-c[3]<bby0)bby0=c[1]-c[3]; if(c[1]+c[3]>bby1)bby1=c[1]+c[3]; }
   if(TS.blobOn>0){ const b=TS.blob, br=b[2]*1.2+b[3];   // wobble is ≤16% of r; +its own k
     if(b[0]-br<bbx0)bbx0=b[0]-br; if(b[0]+br>bbx1)bbx1=b[0]+br;
     if(b[1]-br<bby0)bby0=b[1]-br; if(b[1]+br>bby1)bby1=b[1]+br; }
-  const smar=0.6*kLive+0.06+0.05+Math.abs(parx)+Math.abs(pary);
+  const smar=repGrowth(kLive,nLive)+0.06+0.05+Math.abs(parx)+Math.abs(pary);
   // p=(2·fragCoord−uRes)/uRes.y and the glass sits at cells+par (soapDist
   // samples p−par), so fragCoord = ((p+par)·H+extent)/2; y is bottom-up in both
   // gl_FragCoord and scissor space, so no flip.
