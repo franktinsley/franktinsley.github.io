@@ -1476,12 +1476,13 @@ V4_THEMES.register({
   // the third (nearest) panel layer sits directly behind the timeline rows and
   // its ink survives the glass compression; [0.16,0.78,0.92]@glow .55 put a
   // ~0.2-luminance wash under the bottom row's copy (measured p05 2.5).
-  // patternId 1 claims the tron BACKDROP branch (bgFineTron in the field chunk):
-  // the dot lattice is replaced by an etched circuit plane — continuous lit runs
-  // on a coarse orthogonal lattice, junction pads where two runs cross, all in
-  // this ink. The panel stack above it is unchanged and still takes ink/glow, so
-  // the depth cue and the layout-archetype morph are untouched.
-  bgPanelStyle: { ink: [0.10, 0.52, 0.63], glow: 0.28, patternId: 1 },
+  // NO patternId while the v5 tron pass is pending. An etched circuit plane was
+  // wired here to prove the backdrop dispatch, and it is exactly the failure
+  // docs/v5/DIRECTION.md item 3 names: tron reads as "just a grid", and the
+  // brief wants the grooves IN the surface, not another grid behind it. The
+  // dispatch stays (bgFine's branch is still there); tron claims it again when
+  // the real material pass lands.
+  bgPanelStyle: { ink: [0.10, 0.52, 0.63], glow: 0.28 },
   accents: {},
 });
 // Preload the font (interface requirement for any theme carrying a real font):
