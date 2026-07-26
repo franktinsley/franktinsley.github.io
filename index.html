@@ -56,6 +56,33 @@
      Use the background-COLOR longhand, never the `background` shorthand — the
      shorthand resets background-color, and that value is the one Safari samples. */
   html{ margin:0; background-color:var(--bg-edge); }
+  /* ---- BOOT ------------------------------------------------------------------
+     The page is one 290KB document whose fragment shader compiles SYNCHRONOUSLY,
+     with a 140KB HDRI and 256KB of subset webfonts arriving after it. That is a
+     couple of seconds of black on a cold load with nothing to say it is working —
+     the "is it broken?" window, and it is the first impression.
+     Two rules make this actually work rather than merely exist:
+       * It must PAINT BEFORE the blocking script. So it is the first element in
+         <body>, its CSS is inline above, and it uses a SYSTEM mono stack — the
+         webfonts are part of what we are waiting for, so it cannot ask for them.
+       * It must STAY ALIVE while the main thread is blocked compiling. A width or
+         left animation freezes solid there; a TRANSFORM animation runs on the
+         compositor and keeps moving. That is the difference between reading as
+         "loading" and reading as "hung". It is a scanner, not a progress fill,
+         because progress through a synchronous compile cannot be honestly
+         measured — it reports LIVENESS, not percentage. */
+  #boot{ position:fixed; inset:0; z-index:6; display:grid; place-content:center;
+    gap:14px; justify-items:center; background:#05070a; pointer-events:none;
+    font:500 10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:0.34em; text-transform:uppercase; color:#3f6f7d;
+    transition:opacity .5s ease, visibility 0s linear .5s; }
+  #boot.gone{ opacity:0; visibility:hidden; }
+  #boot .bl{ color:#7fdcea; }
+  #boot .bp{ width:180px; height:1px; background:#12242b; overflow:hidden; }
+  #boot .bp i{ display:block; width:40%; height:100%; background:#7fdcea;
+    animation:bootscan 1.15s cubic-bezier(.6,0,.4,1) infinite; }
+  @keyframes bootscan{ 0%{ transform:translateX(-105%);} 100%{ transform:translateX(355%);} }
+  @media (prefers-reduced-motion: reduce){ #boot .bp i{ animation:none; width:100%; opacity:.5; } }
   body{ margin:0; background:transparent; color:var(--ink); font-family:var(--sans);
     overflow-x:hidden; }
   /* B2 JITTER FIX: #bg was position:absolute and JS-repositioned every frame via
@@ -488,16 +515,16 @@ vec3 bgFineWater(vec4 ink, vec2 sp, vec2 m, float scr){
   // Everything stays dark — the hero copy sits on this — so it is a hue and a
   // gradient doing the work, not brightness.
   float shore = smoothstep(1.15, -0.95, sp.y + 0.14*sin(sp.x*1.6 + uTime*0.055));
-  vec3 deep    = vec3(0.006,0.028,0.040);
-  vec3 shallow = vec3(0.030,0.088,0.082);
-  vec3 sand    = vec3(0.150,0.112,0.068);
+  vec3 deep    = vec3(0.010,0.048,0.066);
+  vec3 shallow = vec3(0.058,0.155,0.145);
+  vec3 sand    = vec3(0.235,0.180,0.112);
   vec3 col = mix(deep, shallow, smoothstep(0.05,0.62,shore));
   col = mix(col, sand, smoothstep(0.62,1.00,shore));
   // the waterline itself: a soft foam band riding the same slow swell. This is
   // the single strongest "beach" cue in the frame — without it the gradient just
   // reads as a vignette.
   float foam = exp(-pow((shore-0.66)*9.0, 2.0));
-  col += foam*vec3(0.105,0.130,0.120);
+  col += foam*vec3(0.190,0.225,0.215);
   col += 0.05*tint*(0.5-0.42*length(sp*vec2(0.72,1.0)));
   float t = uTime*0.25;
   float w1 = sin(dot(q,vec2(0.90,0.44))*11.0 + t*1.3);
@@ -611,6 +638,7 @@ vec3 field(vec2 sp, vec2 m, float scr){
 </script>
 </head>
 <body>
+<div id="boot"><div class="bl">Optical bench</div><div class="bs" id="bootStage">Initialising</div><div class="bp"><i></i></div></div>
 <div id="scroll"></div>
 <canvas id="bg"></canvas><!-- the dot field: SCROLLS, so it reaches Safari's bands -->
 <canvas id="gl"></canvas><!-- the glass: position:fixed, transparent elsewhere -->
@@ -1399,8 +1427,13 @@ const float WTR_NVK=15.628;
 // green has to go with the red, and the light the panel returns has to be
 // partly its own.  So green absorption triples, and the in-scattering term
 // below carries the water's colour.
-const vec3  WTR_SIG=vec3(2.60,1.00,0.60);
-const float WTR_P0=0.42, WTR_P1=1.60;
+// Shallow water, not deep ocean. At the old (2.60,1.00,0.60) over L~2 the Beer
+// term passed (0.005,0.13,0.30) — five thousandths of the red and an eighth of
+// the green — so the panel read as a dark slab rather than as something you can
+// see INTO. Red still goes first (that is what makes water look like water), it
+// just no longer takes green and blue down with it: now ~(0.14,0.53,0.64).
+const vec3  WTR_SIG=vec3(1.35,0.42,0.30);
+const float WTR_P0=0.30, WTR_P1=1.25;   // shorter path with it, so thick areas stay readable
 // in-scattered light: what makes deep water GLOW rather than go black, and the
 // reason the transmitted checker reads as a modulation of the water instead of
 // as the water itself.  Saturating in depth, so it never doubles the rim.
@@ -2837,7 +2870,7 @@ window.V4_THEMES=(function(){
   //   state 4 contact   -> KILN   (matte terracotta: warm, reachable — LIGHT)
   const LAB_SKINS = [
     { skinId:1, alb:[0.02,0.05,0.05], rough:0.10, seam:[0.62,0.95,1.05], gain:0.55,
-      tint:[0.72,1.0,1.0], trans:0.78, logtint:[-5.2,-1.75,-1.55], metal:0.0,
+      tint:[0.72,1.0,1.0], trans:0.90, logtint:[-5.2,-1.75,-1.55], metal:0.0,
       coat:0.0, croug:0.0, rot:0.0,  hi:0.55, lo:0.0,  comp:0.35,
       bgId:1, bgInk:[0.34,0.74,0.60], bgGlow:0.10 },   // sea-green, deliberately off TRON's cyan
     { skinId:4, alb:[0.014,0.016,0.019], rough:0.05, seam:[0.28,1.15,1.35], gain:0.85,
@@ -3647,7 +3680,7 @@ gl.uniform1f(uEnvMaxLod, 0.0);    // no mips on the placeholder yet
     gl.generateMipmap(gl.TEXTURE_2D);
     gl.uniform1f(uEnvMaxLod, Math.floor(Math.log2(Math.max(im.width,im.height))));
     window.__ENV_READY__=true; };
-  im.onerror=()=>{ window.__ENV_ERR__=true; };
+  im.onerror=()=>{ window.__ENV_ERR__=true; };   // boot still dismisses — see bootDone
   im.src='assets/studio_env.png'; }
 
 // ---- the BACKGROUND canvas -------------------------------------------------
@@ -3871,7 +3904,7 @@ function themeFrame(parx, pary){
   // and the centre TRAVELS UP INTO the panel body, so the smin genuinely swallows
   // it. No gate is doing the hiding — the geometry is.
   const absorb=sstep(0.0,0.85,spreadT);
-  const r=R0*(0.85+0.25*riseT)*(1-0.45*absorb);
+  const r=R0*(0.85+0.25*riseT)*(1-0.72*absorb);   // and shrink harder on the way in
   const startY=-1.55;
   // NOTE #3: the blob cluster FLOATS on its own clock and merely FLOWS UPWARD with
   // the scroll, instead of being a pure function of scroll position. tNow is real
@@ -3882,7 +3915,13 @@ function themeFrame(parx, pary){
   const driftY=0.030*Math.sin(tNow*0.29+0.9)+0.016*Math.sin(tNow*0.61+2.4);
   TS.blob[0]=TS.contact[0]+0.10*Math.sin(6.0*u+segI*2.1)*(1-0.6*riseT)+driftX*(1-0.5*riseT);
   const yRest=TS.contact[1]-r*0.35;          // floating just under the panel
-  const yDeep=TS.contact[1]+r*1.25;          // centre well inside the body
+  // yDeep is measured off the PANEL'S OWN BOTTOM EDGE, not off contact. contact sits
+  // BELOW the panel edge, so "above contact" never meant "inside the panel" — the blob
+  // was still poking out by ~0.05 when blobOn cut it, and since blobOn gates the
+  // GEOMETRY as a boolean (bool blob = uBlobOn > 0.0) that read as the blob vanishing
+  // in one frame rather than merging. Owner caught it at frac 3.572 -> 3.606.
+  const pb = (cur && cur.cells && cur.cells[0]) ? cur.cells[0][1]-cur.cells[0][3] : TS.contact[1];
+  const yDeep = pb + r*1.55;                 // centre a full radius and a half inside
   TS.blob[1]=startY+(yRest-startY)*easeO(riseT)+driftY*(1-0.6*riseT)+(yDeep-yRest)*absorb;
   TS.blob[2]=r;
   // merge k RAMPS: small while the blob free-floats (its influence barely
@@ -3903,7 +3942,10 @@ function themeFrame(parx, pary){
   // more than a radius inside the panel, so the union already hides it completely
   // and the fade cannot be seen — where the old r-based cutoff fired while it was
   // still out in the open.
-  TS.blobOn=(riseT>0)?(1-sstep(0.86,1.0,absorb)):0;
+  // Held to the very end of the absorb ramp: blobOn gates the GEOMETRY, so it must
+  // not reach zero until the blob is genuinely swallowed. It is the last 6% now,
+  // by which point the centre is 1.55r inside the panel and r is down to 28%.
+  TS.blobOn=(riseT>0)?(1-sstep(0.94,1.0,absorb)):0;
   TS.blobPh=u*7.0+tNow*0.55;   // note #3: wobble keeps living when the scroll stops
   TS.A=A; TS.B=B; TS.u=u; TS.prog=progP;
   // OCTAGON weight: TRON (skinId 4) asks for the chamfered silhouette. Ramped on the
@@ -4605,8 +4647,16 @@ function loop(now){
   }
   const nx=(2*mx-W)/H, ny=(2*my-H)/H; r_cur.textContent=`x ${sgn(nx)} y ${sgn(ny)}`;
   frames++; if(now-fpsT>=500){ fps=Math.round(frames*1000/(now-fpsT)); frames=0; fpsT=now; r_fps.textContent=String(fps); }
+  // BOOT DISMISS. Waits for the env texture (or its error) AND for one frame to
+  // have actually been drawn — dismissing on DOMContentLoaded would hand over to a
+  // black canvas, which is the same bad impression a beat later. The timeout is a
+  // hard backstop: a missing asset must never leave a loading screen up forever.
+  if(!bootDone && (window.__ENV_READY__ || window.__ENV_ERR__ || now-bootT0>4000)){
+    bootDone=true; const b=document.getElementById('boot'); if(b) b.classList.add('gone');
+  }
   requestAnimationFrame(loop);
 }
+let bootDone=false; const bootT0=performance.now();
 requestAnimationFrame(loop);
 
 // ---- ?diag — on-device viewport instrumentation for the iOS text/glass drift.
