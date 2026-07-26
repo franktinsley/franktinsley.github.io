@@ -110,7 +110,11 @@
   .readout .spacer{ flex:1 1 auto; } .readout .err{ color:#ff7a7a; }
 
   /* pinned content layer — one state visible at a time, driven by scroll */
-  .stage{ position:absolute; inset:0; z-index:1; display:grid; place-items:center; pointer-events:none; }
+  /* overflow-anchor:none — the states scale during the morph, and Chrome's scroll
+     anchoring can respond to a size change by ADJUSTING scrollTop to keep its chosen
+     anchor still. On a scroll-driven page that is a feedback loop, and it lands as the
+     copy settling a few px off when you scroll back up onto a state. */
+  .stage{ position:absolute; inset:0; z-index:1; display:grid; place-items:center; pointer-events:none; overflow-anchor:none; }
   .state{ grid-area:1/1; width:min(760px,86vw); text-align:center; opacity:0; will-change:opacity,transform; }
   .state.on{ pointer-events:auto; }
   /* The legibility scrim hangs off .stage, NOT .state. It used to be .state::before,
@@ -298,7 +302,17 @@ float hashL(float n){ n = fract(n*0.1031); n *= n + 33.33; return fract((n+n)*n)
 // scroll SECTION's family (SEQ), morphing to the next family in the theme-spread
 // window with a small per-panel stagger (see inside).
 vec3 panelLayer(vec2 sp, float scr, float rate, float sc, float bl, float dim, float seed, vec3 inkCol, float glow){
-  vec2 q = sp - vec2(0.0, scr*rate);
+  // OWN MOTION. The panel stack used to be positioned purely by scr*rate, so the
+  // whole backdrop froze solid the moment you stopped scrolling — the scene only
+  // looked alive while you were driving it. It now carries a slow drift of its own
+  // on uTime. Phase and rate are seeded per LAYER so the three depths never move as
+  // one block (that reads as the camera moving, not the panels), amplitude scales
+  // with the layer's own size so near panels travel further than far ones, and the
+  // periods are ~13s/19s — slow enough to read as float rather than as animation,
+  // and far below any rate that could shimmer through the glass's refraction taps.
+  vec2 q = sp - vec2(0.0, scr*rate)
+         + vec2(0.110*sin(uTime*0.077 + seed*6.283),
+                0.058*cos(uTime*0.053 + seed*4.100))*sc;
   float period = 2.5*sc + 0.6;
   float cell = floor((q.y + seed*period)/period);
   float cy = (cell + 0.5)*period - seed*period;
@@ -455,7 +469,24 @@ vec3 bgFineTron(vec4 ink, vec2 sp, vec2 m, float scr){
 vec3 bgFineWater(vec4 ink, vec2 sp, vec2 m, float scr){
   vec2 q = sp - vec2(0.0, scr*RATE_DOTS);
   vec3 tint = ink.rgb;
-  vec3 col = vec3(0.008,0.020,0.028);
+  // A SHORE, not open water. This used to be a flat near-black blue washed with
+  // the ink — and the ink was (0.20,0.55,0.62) against TRON's (0.10,0.52,0.63),
+  // near enough that the two states read as the same world. A beach reads as a
+  // DEPTH GRADIENT: wet warm sand low, shallow green-turquoise through the
+  // middle, deeper blue-green up top, with a slow waterline between them.
+  // Everything stays dark — the hero copy sits on this — so it is a hue and a
+  // gradient doing the work, not brightness.
+  float shore = smoothstep(1.15, -0.95, sp.y + 0.14*sin(sp.x*1.6 + uTime*0.055));
+  vec3 deep    = vec3(0.006,0.028,0.040);
+  vec3 shallow = vec3(0.030,0.088,0.082);
+  vec3 sand    = vec3(0.150,0.112,0.068);
+  vec3 col = mix(deep, shallow, smoothstep(0.05,0.62,shore));
+  col = mix(col, sand, smoothstep(0.62,1.00,shore));
+  // the waterline itself: a soft foam band riding the same slow swell. This is
+  // the single strongest "beach" cue in the frame — without it the gradient just
+  // reads as a vignette.
+  float foam = exp(-pow((shore-0.66)*9.0, 2.0));
+  col += foam*vec3(0.105,0.130,0.120);
   col += 0.05*tint*(0.5-0.42*length(sp*vec2(0.72,1.0)));
   float t = uTime*0.25;
   float w1 = sin(dot(q,vec2(0.90,0.44))*11.0 + t*1.3);
@@ -593,7 +624,7 @@ vec3 field(vec2 sp, vec2 m, float scr){
 <div class="stage">
   <!-- 0 Identity -->
   <section class="state" data-state="0">
-    <p class="eyebrow">Real-time graphics engineer</p>
+    <p class="eyebrow">Frank Tinsley · Real-time graphics engineer</p>
     <h1>I build interactive systems<br>that put on a show.</h1>
     <p class="sub">15+ years · installations · shaders · engines · Unity · Metal · GLSL</p>
   </section>
@@ -605,10 +636,7 @@ vec3 field(vec2 sp, vec2 m, float scr){
       device resolution, every frame. Most of the time, making something more beautiful and making it
       easier to use are the same change — that's the one I aim for. My judgment about that is visual: get
       a rough version on screen early, look at it hard, change it, look again — then harden it until it
-      holds frame rate on the machine it actually ships on. AI makes that loop faster;
-      <strong>it doesn't do the judging</strong>. When I rebuilt Konami's System 573 on an FPGA I didn't
-      call it working because it looked right — I frame-diffed it against MAME until the output
-      matched.</p>
+      holds frame rate on the machine it actually ships on.</p>
   </section>
   <!-- 2 Work -->
   <section class="state" data-state="2">
@@ -618,11 +646,10 @@ vec3 field(vec2 sp, vec2 m, float scr){
         ray-marching 3D modeler — the whole shader stack, smooth booleans, procedural geometry,
         marching-cubes export to STL/OBJ. Interactive frame rates on iOS, iPadOS and macOS.
         ~50,000 lines across ~650 commits, built solo. <a href="mailto:franktinsley@me.com?subject=SDF%20engine%20demo">demo on request</a></p></div>
-      <div class="cell"><h3>Konami System 573 — FPGA core</h3><p>A working FPGA re-implementation of
-        Konami's PSX-based arcade platform for MiSTer — ~22,000 lines of RTL in about a month, in a domain
-        I had no background in. AI-accelerated workflow, verified frame-accurate against MAME by automated
-        frame-diff on real hardware, not by eye.
-        <a href="https://github.com/fabricore-eng/System573_MiSTer">source&nbsp;↗</a></p></div>
+      <div class="cell"><h3>Meta Avatars — real-time interactivity</h3><p>Technical Artist on Meta's avatar
+        system for VR and mixed reality, on avatar rendering and real-time interactivity. Designed and built
+        a visual in-editor tool for authoring mock events and driving them at runtime, so the live-avatar
+        systems could be tested behaviorally instead of by hand.</p></div>
       <div class="cell"><h3>This page</h3><p>The background you're reading over: one signed-distance field,
         no libraries, lit by a single baked studio environment, tracking your cursor or your finger at full
         device resolution. Two WebGL2 programs draw it — one scrolls, one is pinned — sharing the field
@@ -1704,6 +1731,16 @@ const float TRN_FL=0.32, TRN_WALL=0.86, TRN_AO=0.72;
 const float TRN_SX=0.08, TRN_TOP=0.44, TRN_BOT=-0.46;
 const float TRN_R2=0.70710678;                             // 1/sqrt(2)
 const float TRN_VIA=0.75;                                  // via land, x TRN_BW
+// v8 frame gauge — SCREEN units, so the artwork holds one on-screen size at any panel size
+const float TRF_W=0.0042, TRF_T=0.0026;   // ring / branch half-width (~3.4px, ~2.1px at 813)
+const float TRF_MX=0.030, TRF_MY=0.015;   // ring offset out from the measured copy box.
+                                          // MY is deliberately TIGHT: the roll is 0.55*mn,
+                                          // so a run placed for symmetry with MX lands on the
+                                          // shoulder, where rimT fades it to nothing and the
+                                          // frame reads as unfinished rather than as drawn.
+const float TRF_CH=0.075;                 // max 45 chamfer
+const float TRF_S=0.034;                  // stub length
+const float TRF_G=0.011;                  // guard-trace inset from the ring
 
 // TRUE ARC LENGTH, and why it had to be built before a turn could be reversed.
 //
@@ -1957,101 +1994,90 @@ float tStep(vec2 p, float x0, float xj, float y0, float y1, float w,
 Pat patTron(vec3 seam, float gain, Geo G, vec3 a0, float r0, float m0){
   Pat o=patNone(a0,r0,m0);
   vec2 p=G.pw;
-  float bu=1.0e9, bw=TRN_BW, bs=0.0; vec2 bcp=vec2(0.0);
+  float bu=1.0e9, bw=TRF_W, bs=0.0; vec2 bcp=vec2(0.0);
   float sA;                          // running arc length along the pen
 
-  // ---- tier 1: the spine, a square land at each end ----------------------
-  sA=0.0;
-  tAdd(p, vec2(TRN_SX,TRN_TOP), vec2(TRN_SX,TRN_BOT), TRN_SW,
-       vec2(0.0,-1.0), sA, bu,bcp,bw,bs);
-  tPad(p, vec2(TRN_SX,TRN_BOT), TRN_SW*1.30, TRN_SW, sA, bu,bcp,bw,bs);
-  tPad(p, vec2(TRN_SX,TRN_TOP), TRN_SW*1.30, TRN_SW, 0.0, bu,bcp,bw,bs);
-  float uS=bu;                       // min u over the SPINE TIER: see above
-
-  // ---- tier 2: four branches leaving the spine at a right angle ----------
-  // B1 is a STAIRCASE — two turns at UNEQUAL spacing (0.28 then 0.36), on
-  // risers of 0.085 and 0.095, so the second 45 is the longer of the two.  The
-  // staircase is the one vocabulary element worth taking from the editorial
-  // Tron; its fixed four-cell square wave was repetition without variation, so
-  // neither the step positions nor the turn sizes here are periodic.
-  sA=0.0;                            // B1 leaves the spine's top LAND
-  float x1=tStep(p, TRN_SX,-0.20, 0.47, 0.385, TRN_BW, sA, bu,bcp,bw,bs);
-  float x2=tStep(p, x1,    -0.56, 0.385,0.29,  TRN_BW, sA, bu,bcp,bw,bs);
-  float sV1=sA+(x2+0.72);            // arc where L1 tees off B1's outbound run
-  tAdd(p, vec2(x2,0.29), vec2(-0.88,0.29), TRN_BW, vec2(-1.0,0.0), sA,
-       bu,bcp,bw,bs);
-  tPad(p, vec2(-0.88,0.29), TRN_BW*1.75, TRN_BW, sA, bu,bcp,bw,bs);
-
-  // B2 is the branch that TURNS THE OTHER WAY.  Every diagonal in every 45
-  // version so far descended in the same direction within a lobe — three
-  // parallel slashes in the upper lobe — and the network read combed, like a
-  // filter applied to corners rather than a board someone routed.  A real board
-  // turns both ways.  It could not be done before because the packet's arc
-  // length was Manhattan and a rising 45 froze it dead (see tAdd); with the arc
-  // length exact, B2 departs the spine LOW and CLIMBS to its land, so the upper
-  // lobe now has two turns going down-left and one going up-left.  It is also
-  // the longest branch, so it carries the most generous turn in the set (riser
-  // 0.105 -> a 31.2 px diagonal).  Reversing it IMPROVED the worst silhouette
-  // clearance in the whole network, 29.9 -> 30.2 px, because the land it drags
-  // upward moves toward the lobe's vertical centre; a variant that dropped the
-  // departure further, to splay the two upper branches instead of letting them
-  // converge, was rejected numerically at 25.8 px before it cost a render.
-  sA=TRN_TOP+0.055;
-  float x3=tStep(p, TRN_SX,-0.34, -0.055, 0.05, TRN_BW, sA, bu,bcp,bw,bs);
-  float sV2=sA+(x3+0.72);            // arc where L1 lands on B2's outbound run
-  tAdd(p, vec2(x3,0.05), vec2(-0.845,0.05), TRN_BW, vec2(-1.0,0.0), sA,
-       bu,bcp,bw,bs);
-  tPad(p, vec2(-0.845,0.05), TRN_BW*1.75, TRN_BW, sA, bu,bcp,bw,bs);
-
-  // B3 into the lower lobe, one turn, on the shared lower column.
-  sA=TRN_TOP+0.22;
-  float x4=tStep(p, TRN_SX, 0.36, -0.22,-0.30, TRN_BW, sA, bu,bcp,bw,bs);
-  float sV3=sA+(0.52-x4);            // arc where L2 tees off B3's outbound run
-  tAdd(p, vec2(x4,-0.30), vec2(0.66,-0.30), TRN_BW, vec2(1.0,0.0), sA,
-       bu,bcp,bw,bs);
-  tPad(p, vec2(0.66,-0.30), TRN_BW*1.75, TRN_BW, sA, bu,bcp,bw,bs);
-
-  // B4 is the one completely uninterrupted run in the composition, which is
-  // what makes the others' turns read as chosen.
-  sA=TRN_TOP+0.44;
-  float sV4=sA+(0.52-TRN_SX);        // arc where L2 lands on B4
-  tAdd(p, vec2(TRN_SX,-0.44), vec2(0.80,-0.44), TRN_BW, vec2(1.0,0.0), sA,
-       bu,bcp,bw,bs);
-  tPad(p, vec2(0.80,-0.44), TRN_BW*1.75, TRN_BW, sA, bu,bcp,bw,bs);
-
-  // ---- tier 3: LINKS, not stubs -----------------------------------------
-  // A short run hanging off a branch and ending in a dot is a dangling pin —
-  // the last surviving piece of autorouter vocabulary in every version judged
-  // so far.  These two instead JOIN two branches, so each one is a net with a
-  // reason to exist.  Both ends are square tees onto their parents — junctions,
-  // like the branch departures, and for the same reason.  Each link's packet
-  // phase is picked up from the arc at the tee it departs, so it is continuous
-  // with its parent where it leaves.
+  // ---- v8 ROUTING: a keepout frame around the copy -------------------------
+  // The old net was ONE hand-authored spine down the panel CENTRE with branches
+  // fanning off it — which is exactly where the copy sits, so glowing traces ran
+  // under nine consecutive lines of the lede and a solder pad sat under a
+  // heading. That was then masked back out by fading emission over a text
+  // ellipse. Masking is the wrong tool: a board designer routes AROUND a
+  // keepout, they do not draw through it and erase it afterwards. So the net is
+  // now built FROM the measured copy box (uTxt) and frames the type — at any
+  // copy length, in any state, with no mask at all.
   //
-  // Every end of both links now lands on a VIA — a small square land, half the
-  // size of a terminal land and about twice the trace width.  Bare copper was
-  // the last un-boardlike junction in the approved version: a 2.7 px hairline
-  // dying against a 5.7 px run at an unmarked point reads as a scratch, and a
-  // net that changes layer changes it AT a land, never mid-run.  The size
-  // ladder is now trace 5.7 px < via 10 px < land 15.6 px, which is the same
-  // three-tier logic the widths already use.  The vias are declared after the
-  // runs and before the links, so a land always wins its own square: the
-  // hairline disappears under it instead of crossing it.
-  // All FOUR vias are declared before EITHER link, not interleaved.  They are
-  // branch-tier by width, so this is what lets one uB below stand for the whole
-  // of tiers 1-2; within a tier the record is a min, so the reorder cannot move
-  // a pixel.
-  tPad(p, vec2(-0.72, 0.29), TRN_BW*TRN_VIA, TRN_BW, sV1, bu,bcp,bw,bs);
-  tPad(p, vec2(-0.72, 0.05), TRN_BW*TRN_VIA, TRN_BW, sV2, bu,bcp,bw,bs);
-  tPad(p, vec2( 0.52,-0.30), TRN_BW*TRN_VIA, TRN_BW, sV3, bu,bcp,bw,bs);
-  tPad(p, vec2( 0.52,-0.44), TRN_BW*TRN_VIA, TRN_BW, sV4, bu,bcp,bw,bs);
-  float uB=bu;                       // min u over tiers 1-2: see the glow note
-  sA=sV1;
-  tAdd(p, vec2(-0.72,0.29), vec2(-0.72,0.05), TRN_TW, vec2(0.0,-1.0), sA,
-       bu,bcp,bw,bs);
-  sA=sV3;
-  tAdd(p, vec2(0.52,-0.30), vec2(0.52,-0.44), TRN_TW, vec2(0.0,-1.0), sA,
-       bu,bcp,bw,bs);
+  // Everything is in SCREEN units. A board's traces are a physical gauge; they
+  // do not grow because the board got bigger, and neither do these. The old
+  // widths were TRN_SW=0.030 half-width — 24px of trace on screen — which is
+  // what read as massive.
+  vec2 C = uTxt.xy;
+  vec2 H = uTxt.zw + vec2(TRF_MX, TRF_MY);
+  float ch = min(min(H.x, H.y)*0.32, TRF_CH);       // 45 chamfer, bounded by the short side
+  vec2 TL=C+vec2(-H.x, H.y), TR=C+vec2( H.x, H.y);
+  vec2 BR=C+vec2( H.x,-H.y), BL=C+vec2(-H.x,-H.y);
+
+  // The ring, walked ONCE in one direction so the packet's arc length runs
+  // continuously the whole way round instead of restarting on every side.
+  // Corners turn in two 45s, never a 90 — the inside of a square corner is an
+  // acid trap in etch and an impedance step in copper, so real routing chamfers.
+  sA=0.0;
+  tAdd(p, TL+vec2(ch,0.0), TR-vec2(ch,0.0), TRF_W, vec2(1.0,0.0),  sA, bu,bcp,bw,bs);
+  tAdd(p, TR-vec2(ch,0.0), TR-vec2(0.0,ch), TRF_W, vec2( TRN_R2,-TRN_R2), sA, bu,bcp,bw,bs);
+  tAdd(p, TR-vec2(0.0,ch), BR+vec2(0.0,ch), TRF_W, vec2(0.0,-1.0), sA, bu,bcp,bw,bs);
+  tAdd(p, BR+vec2(0.0,ch), BR-vec2(ch,0.0), TRF_W, vec2(-TRN_R2,-TRN_R2), sA, bu,bcp,bw,bs);
+  tAdd(p, BR-vec2(ch,0.0), BL+vec2(ch,0.0), TRF_W, vec2(-1.0,0.0), sA, bu,bcp,bw,bs);
+  tAdd(p, BL+vec2(ch,0.0), BL+vec2(0.0,ch), TRF_W, vec2(-TRN_R2, TRN_R2), sA, bu,bcp,bw,bs);
+  tAdd(p, BL+vec2(0.0,ch), TL-vec2(0.0,ch), TRF_W, vec2(0.0,1.0),  sA, bu,bcp,bw,bs);
+  tAdd(p, TL-vec2(0.0,ch), TL+vec2(ch,0.0), TRF_W, vec2( TRN_R2, TRN_R2), sA, bu,bcp,bw,bs);
+  float uS=bu;                       // RING tier — plays the old spine's role in the glow ramp
+
+  // Vias on the ring at each chamfer, where a real board changes layer.
+  tPad(p, TR+vec2(-ch*0.5,-ch*0.5), TRF_W*1.5, TRF_W, sA*0.15, bu,bcp,bw,bs);
+  tPad(p, BR+vec2(-ch*0.5, ch*0.5), TRF_W*1.5, TRF_W, sA*0.40, bu,bcp,bw,bs);
+  tPad(p, BL+vec2( ch*0.5, ch*0.5), TRF_W*1.5, TRF_W, sA*0.65, bu,bcp,bw,bs);
+  tPad(p, TL+vec2( ch*0.5,-ch*0.5), TRF_W*1.5, TRF_W, sA*0.90, bu,bcp,bw,bs);
+
+  // Fan-out: short stubs leaving the ring OUTWARD into the panel margin, each
+  // terminating in a square land — never inward, so nothing can reach the type.
+  // Thin gauge, so the frame stays the primary line and these read the way a
+  // board reads at its edge connector.
+  // Fan out SIDEWAYS, not up and down. A text column leaves generous margin left
+  // and right of it and almost none above or below, so that is where a real
+  // layout would run its breakout — and it keeps every stub on the flat interior
+  // instead of climbing the roll.
+  float sB=sA;
+  vec2 fL0=C+vec2(-H.x, H.y*0.42), fL1=C+vec2(-H.x,-H.y*0.30);   // NOT r0/r1 — patTron
+  vec2 fR0=C+vec2( H.x, H.y*0.16), fR1=C+vec2( H.x,-H.y*0.55);   // already takes r0 (roughness)
+  tAdd(p, fL0, fL0-vec2(TRF_S,0.0),      TRF_T, vec2(-1.0,0.0), sB, bu,bcp,bw,bs);
+  tPad(p, fL0-vec2(TRF_S,0.0),      TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
+  tAdd(p, fL1, fL1-vec2(TRF_S*0.58,0.0), TRF_T, vec2(-1.0,0.0), sB, bu,bcp,bw,bs);
+  tPad(p, fL1-vec2(TRF_S*0.58,0.0), TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
+  tAdd(p, fR0, fR0+vec2(TRF_S*0.72,0.0), TRF_T, vec2( 1.0,0.0), sB, bu,bcp,bw,bs);
+  tPad(p, fR0+vec2(TRF_S*0.72,0.0), TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
+  tAdd(p, fR1, fR1+vec2(TRF_S,0.0),      TRF_T, vec2( 1.0,0.0), sB, bu,bcp,bw,bs);
+  tPad(p, fR1+vec2(TRF_S,0.0),      TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
+
+  // A guard trace running parallel OUTSIDE each vertical run — a ground guard
+  // beside a signal is real board vocabulary, and it stops the frame reading as
+  // one drawn rectangle. Outside, because inside is where the copy is.
+  tAdd(p, TL+vec2(-TRF_G, -ch*1.3), BL+vec2(-TRF_G, ch*1.3), TRF_T, vec2(0.0,-1.0), sB, bu,bcp,bw,bs);
+  tAdd(p, TR+vec2( TRF_G, -ch*1.3), BR+vec2( TRF_G, ch*1.3), TRF_T, vec2(0.0,-1.0), sB, bu,bcp,bw,bs);
+  float uB=bu;                       // BRANCH tier
+
+  // ROOM TO ROUTE. The frame lives in the keepout between the copy box and the
+  // flat interior, and the roll eats 0.55*mn off every edge, so that gap can be
+  // narrow — on a phone, where the copy fills the panel, it is nothing at all.
+  // A trace clipped by the silhouette looks accidental, which is fatal in a
+  // composition whose whole claim is deliberate placement. So when there is no
+  // keepout to route in, the net FADES OUT rather than being cut against the
+  // outline: clean glass is an honest answer, a chopped-off frame is not.
+  // Dividing the normalised distances is what does it — everything downstream
+  // keys off u, so pushing u up retires the whole net smoothly and at once.
+  float fits = smoothstep(0.006, 0.020, G.mnp - uTxt.w);
+  float inv  = 1.0/max(fits, 1.0e-3);
+  bu *= inv; uS *= inv; uB *= inv;
+
 
   // black margin: the network must never touch the outline.  A trace clipped by
   // the silhouette looks accidental, which is fatal in a composition whose whole
@@ -2144,27 +2170,11 @@ Pat patTron(vec3 seam, float gain, Geo G, vec3 a0, float r0, float m0){
   o.emis = seam*gain*( base*floorE*core*0.62
                      + base*hot*(2.60+2.40*q8)
                      +      halo*(0.10+0.13*q8) );
-  // NOTE #6: keep the traces from running THROUGH the copy. The layout's spine sits
-  // near panel centre, which is exactly where the headline and body sit, so the
-  // glowing traces were crossing the text. Fade the EMISSION over an elliptical
-  // copy zone around the panel centroid (wider than tall, as text blocks are) —
-  // the etched grooves themselves stay (they are dark and cost no legibility), so
-  // the surface still reads as milled, but the light flows around the words rather
-  // than under them. TRN_CLR keeps a faint ember inside so traces don't just vanish.
-  // Masked in G.pw directly: the trace layout is authored in absolute G.pw coords
-  // centred near the panel, whereas G.cw is the dominant-form centre in a different
-  // (pre-parallax) space — using it put the ellipse in the wrong place entirely.
-  // Driven by the MEASURED copy bbox (uTxt), not by fixed radii. The old ellipse
-  // cleared only |pw.y|<0.341 while the lede filled almost the whole panel, so in
-  // a settled state glowing traces crossed nine consecutive lines of body copy and
-  // a solder pad sat under a heading. An ellipse cannot cover a rectangular block
-  // without either spilling past the rim or leaving the line ends exposed — so use
-  // a rounded-rect distance, and take the interior to ZERO rather than 10%: a tenth
-  // of a hot pad is still the brightest thing in a column of type.
-  const float TRN_TXR=0.06, TRN_TXF=0.10;   // mask corner radius, falloff width
-  vec2  q  = abs(G.pw - uTxt.xy) - uTxt.zw + TRN_TXR;
-  float td = length(max(q,vec2(0.0))) + min(max(q.x,q.y),0.0) - TRN_TXR;
-  o.emis *= smoothstep(0.0, TRN_TXF, td);   // 0 over the copy, 1 clear of it
+  // NOTE #6 is GONE — and deliberately. The emission used to be faded over a
+  // text zone to keep glowing traces off the copy, because the net was routed
+  // down the panel centre and ran straight through it. The routing above now
+  // frames the copy instead of crossing it, so there is nothing to mask: the
+  // traces are where a board designer would have put them in the first place.
   return o; }
 
 // ---------- 5 KILN (v7) ------------------------------------------------------
@@ -2606,7 +2616,7 @@ window.V4_THEMES=(function(){
     { skinId:1, alb:[0.02,0.05,0.05], rough:0.10, seam:[0.62,0.95,1.05], gain:0.55,
       tint:[0.72,1.0,1.0], trans:0.78, logtint:[-5.2,-1.75,-1.55], metal:0.0,
       coat:0.0, croug:0.0, rot:0.0,  hi:0.55, lo:0.0,  comp:0.35,
-      bgId:1, bgInk:[0.20,0.55,0.62], bgGlow:0.10 },
+      bgId:1, bgInk:[0.34,0.74,0.60], bgGlow:0.10 },   // sea-green, deliberately off TRON's cyan
     { skinId:4, alb:[0.014,0.016,0.019], rough:0.05, seam:[0.28,1.15,1.35], gain:0.85,
       tint:[1,1,1], trans:0.0, logtint:[0,0,0], metal:0.0,
       coat:0.85, croug:0.045, rot:0.0, hi:0.85, lo:0.0, comp:0.0,
@@ -3625,7 +3635,20 @@ function themeFrame(parx, pary){
   // gap under the panel until the morph window opens (~u 0.30), then closes it.
   const easeO=t=>t*(2-t);
   const R0=0.34;
-  const r=R0*(0.85+0.25*riseT)*(1-sstep(0,0.85,spreadT));
+  // ABSORPTION. This used to shrink r to ZERO in place, which caused all three
+  // of the reported artifacts at once:
+  //   * the DONUT — blob[3] (its own smin k) ramps to 0.09 independently of r, so
+  //     once r fell below k the blend radius exceeded the sphere and the union
+  //     field around it degenerated into a ring;
+  //   * the ABRUPT VANISH — it evaporated where it stood instead of travelling
+  //     into the panel, so it was still plainly visible when the r>0.012 geometry
+  //     gate switched it off;
+  //   * and it left the blob hanging around the bottom edge throughout.
+  // Now it is absorbed the way a union actually absorbs: r shrinks only gently
+  // and the centre TRAVELS UP INTO the panel body, so the smin genuinely swallows
+  // it. No gate is doing the hiding — the geometry is.
+  const absorb=sstep(0.0,0.85,spreadT);
+  const r=R0*(0.85+0.25*riseT)*(1-0.45*absorb);
   const startY=-1.55;
   // NOTE #3: the blob cluster FLOATS on its own clock and merely FLOWS UPWARD with
   // the scroll, instead of being a pure function of scroll position. tNow is real
@@ -3635,18 +3658,29 @@ function themeFrame(parx, pary){
   const driftX=0.055*Math.sin(tNow*0.37+segI*2.1)+0.028*Math.sin(tNow*0.83+1.7);
   const driftY=0.030*Math.sin(tNow*0.29+0.9)+0.016*Math.sin(tNow*0.61+2.4);
   TS.blob[0]=TS.contact[0]+0.10*Math.sin(6.0*u+segI*2.1)*(1-0.6*riseT)+driftX*(1-0.5*riseT);
-  TS.blob[1]=startY+(TS.contact[1]-r*0.35-startY)*easeO(riseT)+driftY*(1-0.6*riseT);
+  const yRest=TS.contact[1]-r*0.35;          // floating just under the panel
+  const yDeep=TS.contact[1]+r*1.25;          // centre well inside the body
+  TS.blob[1]=startY+(yRest-startY)*easeO(riseT)+driftY*(1-0.6*riseT)+(yDeep-yRest)*absorb;
   TS.blob[2]=r;
   // merge k RAMPS: small while the blob free-floats (its influence barely
   // reaches past its own rim), up to the gooey 0.09 as it closes on the panel —
   // this is what makes the pre-contact float READ as a separate body.
-  TS.blob[3]=0.035+0.055*sstep(0.55,1.0,riseT);
+  // CLAMPED TO HALF THE RADIUS. A smin whose blend radius exceeds the sphere it is
+  // blending is what produced the donut; k <= r/2 cannot. The extra width on
+  // absorb widens the JUNCTION as the blob merges, which is what removes the
+  // crease in the armpit between blob and panel — that crease is a blend-width
+  // mismatch, the blob folding at 0.09 into a panel chain folding at up to 0.25.
+  TS.blob[3]=Math.min(0.5*r, 0.035+0.055*sstep(0.55,1.0,riseT)+0.11*absorb);
   // blobOn doubles as the blob MATERIAL weight's fade (review-found continuity
   // nit): r crosses the 0.012 geometry cutoff while the blob centre still sits
   // just inside the panel with wBlob~0.5, so a hot-material fleck blinked off
   // in one tick. The fade reaches 0 exactly at the cutoff, so the material is
   // gone BEFORE the ~4px geometry pops; still a pure function of u.
-  TS.blobOn=(riseT>0 && r>0.012)?sstep(0.012,0.045,r):0;
+  // Fades on ABSORB, not on r. By the time this reaches zero the blob's centre is
+  // more than a radius inside the panel, so the union already hides it completely
+  // and the fade cannot be seen — where the old r-based cutoff fired while it was
+  // still out in the open.
+  TS.blobOn=(riseT>0)?(1-sstep(0.86,1.0,absorb)):0;
   TS.blobPh=u*7.0+tNow*0.55;   // note #3: wobble keeps living when the scroll stops
   TS.A=A; TS.B=B; TS.u=u; TS.prog=progP;
   TS.riseT=riseT; TS.spreadT=spreadT;
@@ -3890,7 +3924,12 @@ function buildStates(){
     return fn();
   };
   const st=[];
-  st[0]=asTheme(0,()=>({cells:oneForm(R(secs[0], mob?14:46, clear(mob?30:40))), k:0.16, corner:0.15, txt:txt(0)}));
+  // State 0 carries the LAGOON water line, whose ripple cuts the silhouette INWARD by
+  // up to WTR_LINE (~8px at this height) wherever a trough lands. Measured against the
+  // old pad that ate most of the clearance around the copy, so the edge came at the
+  // type. Pad it back out by more than the ripple's full excursion so the crest-to-
+  // trough range never reaches the text, and give the state some extra air besides.
+  st[0]=asTheme(0,()=>({cells:oneForm(R(secs[0], mob?26:70, clear(mob?44:60))), k:0.16, corner:0.15, txt:txt(0)}));
   st[1]=asTheme(1,()=>({cells:oneForm(R(secs[1], mob?16:40, clear(mob?30:34))), k:0.16, corner:0.15, txt:txt(1)}));
   st[2]=asTheme(2,()=>{
     const items=[...secs[2].querySelectorAll('.grid .cell')].map(el=>R(el, mob?18:21, mob?13:21));
@@ -3973,10 +4012,16 @@ function scrollTarget(){
     // selectable, screen-reader accessible); at a settled state the transform is
     // exactly identity, so type stays pixel-sharp — only mid-morph does it move.
     if(o<=0 || o>=1){ secs[k].style.transform=''; }
+    // SYMMETRIC both ways. These used to be 14px/4.5% one way and 10px/5.5% the
+    // other, so the copy arrived differently depending on whether you scrolled
+    // down into a state or back up onto it — the direction you came from was
+    // visible in where the type settled. Same magnitude on both branches means
+    // neither direction is favoured; only the sign differs, which is what makes
+    // the copy travel WITH the page rather than against it.
     else if(k===i){ const q=1-o;                       // outgoing: recede
-      secs[k].style.transform='translate3d(0,'+(-14*q).toFixed(2)+'px,0) scale('+(1-0.045*q).toFixed(4)+')'; }
+      secs[k].style.transform='translate3d(0,'+(-12*q).toFixed(2)+'px,0) scale('+(1-0.05*q).toFixed(4)+')'; }
     else if(k===i+1){ const q=1-o;                     // incoming: emerge
-      secs[k].style.transform='translate3d(0,'+(10*q).toFixed(2)+'px,0) scale('+(1-0.055*q).toFixed(4)+')'; }
+      secs[k].style.transform='translate3d(0,'+(12*q).toFixed(2)+'px,0) scale('+(1-0.05*q).toFixed(4)+')'; }
     secs[k].classList.toggle('on', o>0.5);
   }
   // The scrim LEADS the copy at both ends -- already at full strength before type
