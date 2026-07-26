@@ -853,7 +853,7 @@ float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return 
 const float REFR_GAIN = 1.8;  // how much of the true refracted exit offset to apply
 const float SOAP_R2   = 0.70710678;
 const float SOAP_TRL  = 0.21;   // TRON roll, x the soap roll — a crisp face, not a pillow
-const float SOAP_TPR  = 0.26;   // end taper: how fast the end caps slope inward
+const float SOAP_TPR  = 0.34;   // end taper: how fast the end caps slope inward
 const float SOAP_TPX  = 0.81155; // = normalize(1,SOAP_TPR).x, for the gradient
 const float SOAP_TPY  = 0.58432; // = normalize(1,SOAP_TPR).y
 const float TRN_NK    = 0.10;   // notch corner softness, x mn   // octagon: corner cut along the diagonal, x mn
@@ -1839,7 +1839,11 @@ const float TRF_MX=0.030, TRF_MY=0.015;   // ring offset out from the measured c
 const float TRF_CH=0.075;                 // max 45 chamfer
 const float TRF_S=0.034;                  // stub length
 const float TRF_G=0.011;                  // guard-trace inset from the ring
-const float TRF_IN=0.16;                  // frame inset off the rim, x mn
+const float TRF_CL=0.026;                 // min gap the frame keeps off the copy box
+// Inset must clear the ROLL, not just be a small fraction: the flat face ends at
+// S0 = R + w/2, which for TRON's 0.21x roll is 0.147*mn. At 0.16 the contour sat
+// exactly on that boundary and rimT faded the top and bottom runs to nothing.
+const float TRF_IN=0.30;                  // frame inset off the rim, x mn
 const float TRF_FG=0.030;                 // feed lands stop this far off the copy box
 const float TRF_BAND=0.34;               // early-out: how far the net reaches off the frame
 const float TRF_BEV=0.018, TRF_BEVA=0.62;  // bevel half-width (~7px) + its slope amplitude
@@ -2155,7 +2159,12 @@ Pat patTron(vec3 seam, float gain, Geo G, vec3 a0, float r0, float m0){
   // is 0.21x now, so the flat face runs almost to the rim and that objection is
   // gone.) TRF_IN is the inset that keeps the contour on the flat face.
   vec2 C = uPan.xy;
-  vec2 H = uPan.zw - vec2(TRF_IN*G.mnp);
+  // Off the rim where there is room, but NEVER inside the copy. On a phone the
+  // panel is barely wider than the text, so a fixed inset off the rim lands inside
+  // the copy box and the lede runs straight through the rails. max() against the
+  // copy box plus a clearance means the frame gives way to the text rather than
+  // crossing it — the text is what the frame is for.
+  vec2 H = max(uPan.zw - vec2(TRF_IN*G.mnp), uTxt.zw + vec2(TRF_CL));
   float ch = min(min(H.x, H.y)*0.32, TRF_CH);       // 45 chamfer, bounded by the short side
   vec2 TL=C+vec2(-H.x, H.y), TR=C+vec2( H.x, H.y);
   vec2 BR=C+vec2( H.x,-H.y), BL=C+vec2(-H.x,-H.y);
@@ -4164,7 +4173,7 @@ function buildStates(){ bsCount++;
   // type. Pad it back out by more than the ripple's full excursion so the crest-to-
   // trough range never reaches the text, and give the state some extra air besides.
   st[0]=asTheme(0,()=>({cells:oneForm(R(secs[0], mob?26:70, clear(mob?44:60))), k:0.006, corner:0.15, txt:txt(0)}));
-  st[1]=asTheme(1,()=>({cells:oneForm(R(secs[1], mob?16:40, clear(mob?30:34))), k:0.006, corner:0.15, txt:txt(1)}));
+  st[1]=asTheme(1,()=>({cells:oneForm(R(secs[1], mob?34:52, clear(mob?44:58))), k:0.006, corner:0.15, txt:txt(1)}));
   st[2]=asTheme(2,()=>{
     const items=[...secs[2].querySelectorAll('.grid .cell')].map(el=>R(el, mob?18:21, mob?13:21));
     return {cells:fill([items[0],items[1],items[2],items[3],eyeb(2)]), k:0.005, corner:0.06, txt:txt(2)}; });
