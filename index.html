@@ -840,16 +840,39 @@ void soapCell(int i, vec2 p, float px,
 // Deterministic: wob is a pure function of uBlobPh (scroll-derived), so the
 // shape scrubs backwards identically.
 void soapBlobC(vec2 p, float px, out float c, out float Rb, out vec2 gc, out float mnO){
-  vec2 rel = p - uBlob.xy;
-  float rr = max(length(rel), 1e-6);
-  float ang = atan(rel.y, rel.x);
-  float wob  = 1.0 + 0.10*sin(3.0*ang + uBlobPh) + 0.06*sin(5.0*ang - 1.7*uBlobPh);
-  float dwob =       0.30*cos(3.0*ang + uBlobPh) + 0.30*cos(5.0*ang - 1.7*uBlobPh);
+  // NOTE #3: not one blob but a small CLUSTER of spheres that merge into each
+  // other and then into the panel, all through the same smooth field — the owner
+  // asked for "actual scene objects like spheres, maybe multiple spheres" merging
+  // with "our actual merging smooth blending", not a canned sweep. Two companion
+  // lobes orbit the lead sphere on the wobble clock; they are folded here (inside
+  // the existing blob term) so the union/solve cost and register pressure are
+  // unchanged — no new uniforms, no new per-cell loop.
   Rb = max(uBlob.z, 1.5*px);
-  c  = rr/wob;
-  vec2 u = rel/rr;
-  gc = u/wob - vec2(-u.y, u.x)*(dwob/(wob*wob));   // grad c — bounded
-  mnO = Rb;
+  vec2 o1 = vec2(cos(uBlobPh*0.41+1.1), sin(uBlobPh*0.33+0.4))*(Rb*0.78);
+  vec2 o2 = vec2(cos(uBlobPh*0.27+3.9), sin(uBlobPh*0.47+2.2))*(Rb*0.66);
+  vec2 relL[3]; float scl[3];
+  relL[0]=p-uBlob.xy;            scl[0]=1.00;
+  relL[1]=p-(uBlob.xy+o1);       scl[1]=0.62;   // companion spheres, smaller
+  relL[2]=p-(uBlob.xy+o2);       scl[2]=0.50;
+  float cBest=1e9; vec2 gBest=vec2(0.0,1.0);
+  for(int i=0;i<3;i++){
+    vec2 rl=relL[i];
+    float rr = max(length(rl), 1e-6);
+    float ang = atan(rl.y, rl.x);
+    float wob  = 1.0 + 0.10*sin(3.0*ang + uBlobPh) + 0.06*sin(5.0*ang - 1.7*uBlobPh);
+    float dwob =       0.30*cos(3.0*ang + uBlobPh) + 0.30*cos(5.0*ang - 1.7*uBlobPh);
+    float ci = rr/(wob*scl[i]);
+    vec2 u = rl/rr;
+    vec2 gi = (u/wob - vec2(-u.y, u.x)*(dwob/(wob*wob)))/scl[i];
+    // smooth union of the lobes (same sqPhi fold the panels use), k scaled to Rb
+    if(i==0){ cBest=ci; gBest=gi; }
+    else {
+      float kb=0.42, dph;
+      float m=cBest + kb*sqPhi((ci-cBest)/kb, dph);
+      gBest=mix(gBest, gi, dph); cBest=m;
+    }
+  }
+  c = cBest; gc = gBest; mnO = Rb;
 }
 // The z=0 slice of the union — the silhouette field. Near-Euclidean OUTSIDE
 // (|grad| = 1 on the pure branches), which is what the coverage AA, rim line,
@@ -3541,8 +3564,15 @@ function themeFrame(parx, pary){
   const R0=0.34;
   const r=R0*(0.85+0.25*riseT)*(1-sstep(0,0.85,spreadT));
   const startY=-1.55;
-  TS.blob[0]=TS.contact[0]+0.10*Math.sin(6.0*u+segI*2.1)*(1-0.6*riseT);
-  TS.blob[1]=startY+(TS.contact[1]-r*0.35-startY)*easeO(riseT);
+  // NOTE #3: the blob cluster FLOATS on its own clock and merely FLOWS UPWARD with
+  // the scroll, instead of being a pure function of scroll position. tNow is real
+  // time, so the drift keeps moving when you stop and never replays identically;
+  // scroll still drives the rise (riseT), so it reads as carried by the current.
+  const tNow=performance.now()*0.001;
+  const driftX=0.055*Math.sin(tNow*0.37+segI*2.1)+0.028*Math.sin(tNow*0.83+1.7);
+  const driftY=0.030*Math.sin(tNow*0.29+0.9)+0.016*Math.sin(tNow*0.61+2.4);
+  TS.blob[0]=TS.contact[0]+0.10*Math.sin(6.0*u+segI*2.1)*(1-0.6*riseT)+driftX*(1-0.5*riseT);
+  TS.blob[1]=startY+(TS.contact[1]-r*0.35-startY)*easeO(riseT)+driftY*(1-0.6*riseT);
   TS.blob[2]=r;
   // merge k RAMPS: small while the blob free-floats (its influence barely
   // reaches past its own rim), up to the gooey 0.09 as it closes on the panel —
@@ -3554,7 +3584,7 @@ function themeFrame(parx, pary){
   // in one tick. The fade reaches 0 exactly at the cutoff, so the material is
   // gone BEFORE the ~4px geometry pops; still a pure function of u.
   TS.blobOn=(riseT>0 && r>0.012)?sstep(0.012,0.045,r):0;
-  TS.blobPh=u*7.0;
+  TS.blobPh=u*7.0+tNow*0.55;   // note #3: wobble keeps living when the scroll stops
   TS.A=A; TS.B=B; TS.u=u; TS.prog=progP;
   TS.riseT=riseT; TS.spreadT=spreadT;
   TS.matA=V4_THEMES.mat(A,false); TS.matB=V4_THEMES.mat(B,false); TS.matBlob=V4_THEMES.mat(B,true);
@@ -3821,6 +3851,18 @@ function scrollTarget(){
     if(k===i)   o=1-Math.min(Math.max((frac-0.26)/0.14,0),1);
     if(k===i+1) o=Math.min(Math.max((frac-0.50)/0.20,0),1);
     secs[k].style.opacity=o.toFixed(3);
+    // NOTE #1: the copy MORPHS WITH the panel instead of just cross-fading. The
+    // outgoing block recedes (shrinks + drifts up) as its panel is absorbed, and
+    // the incoming block emerges (grows from slightly small) as its panel forms —
+    // so the text reads as part of the same body that is transforming, which is
+    // what the DOM-merge prototype demonstrated. Real DOM is kept (crisp,
+    // selectable, screen-reader accessible); at a settled state the transform is
+    // exactly identity, so type stays pixel-sharp — only mid-morph does it move.
+    if(o<=0 || o>=1){ secs[k].style.transform=''; }
+    else if(k===i){ const q=1-o;                       // outgoing: recede
+      secs[k].style.transform='translate3d(0,'+(-14*q).toFixed(2)+'px,0) scale('+(1-0.045*q).toFixed(4)+')'; }
+    else if(k===i+1){ const q=1-o;                     // incoming: emerge
+      secs[k].style.transform='translate3d(0,'+(10*q).toFixed(2)+'px,0) scale('+(1-0.055*q).toFixed(4)+')'; }
     secs[k].classList.toggle('on', o>0.5);
   }
   hint.style.opacity = p>0.02 ? '0':'0.8';
