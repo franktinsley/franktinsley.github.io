@@ -741,6 +741,8 @@ precision highp float;
 uniform vec2  uRes;
 uniform float uTime;
 uniform vec4  uCells[NCELL];   // xy = center, zw = half-size (y-normalized units)
+uniform float uFoldG;          // repGrowth(uK, uN): the fold chain's coincident growth.
+                               // The corner subtracts it because the fold adds it back.
 uniform float uMnI[NCELL];     // INTENT mn per cell (min half-size before compensation).
                                // uCells.zw is the COMPENSATED box, whose shrink cancels the
                                // fold chain's growth so the union EDGE lands on the intent.
@@ -878,13 +880,29 @@ void soapCell(int i, vec2 p, float px,
   // mn comes from the INTENT box, never the compensated one — see uMnI. b (compensated)
   // still places the edge below via bs = b - S0, so the silhouette is unchanged.
   float mn = max(uMnI[i], 1.5*px);
+  // THE CORNER MUST PAY BACK THE FOLD'S OWN ROUNDING.
+  // smin(a,a,k) = a - k/4: folding N coincident cells offsets the field OUTWARD,
+  // and an SDF offset rounds every convex corner by that same amount. compCells
+  // shrinks the boxes so the EDGE lands back on the intent — which is why every
+  // edge measurement came out smooth — but shrinking a box does not un-round its
+  // corners. So the drawn corner carried R + growth at N cells and plain R at one,
+  // and it SNAPPED the instant nLive stepped. That is the corner jump: cell count
+  // 7c -> 1c and 5c -> 1c, with buildStates never firing (owner's screenshots).
+  // The growth is exactly what compCells already took out, so read it straight
+  // back off the two boxes and subtract it here. It jumps by the same amount, in
+  // the opposite direction, at the same instant — so the corner comes out
+  // continuous even though both terms are discontinuous.
+  // uFoldG is repGrowth(kLive, nLive) — the EXACT offset, straight from the JS that
+  // already computes it for compCells. Subtracting the box shrink instead was only
+  // an approximation of it (compCells shrinks per-axis by the measured edge push,
+  // capped at this), and it left about a quarter of the jump behind.
   // ONE rounding mechanism, structurally. There used to be a second source here:
   // R = max(SOAP_ROLL*mn, min(uCorner, 0.5*mn)). It could never actually win —
   // the request is clamped to 0.5*mn and SOAP_ROLL is 0.55 — so it was dead, but
   // it left a max() that would silently become a SECOND rounding regime the moment
   // anyone raised uCorner or lowered SOAP_ROLL. The roll IS the corner in this
   // family (corner curvature == edge curvature identically); nothing else may round.
-  float R  = SOAP_ROLL*mn;
+  float R  = max(SOAP_ROLL*mn - uFoldG, 0.16*SOAP_ROLL*mn);
   float w  = SOAP_SEAM*R;
   float S0 = R + 0.5*w;                       // shrink: edge silhouette lands on b
   float cap = 0.92*mn;
@@ -3403,7 +3421,7 @@ const U=n=>gl.getUniformLocation(prog,n);
 // uLight is RETIRED (v4.5: the key light is the shader const KEY_L — one sun,
 // not a knob). The lookup stays (null) so tests/glass-zoom.js's unguarded
 // uniform3f(uLight,...) remains a legal no-op instead of a ReferenceError.
-const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
+const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uFoldGU=U('uFoldG'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
   uMatA=U('uMatA[0]'),uMatB=U('uMatB[0]'),uMatBlob=U('uMatBlob[0]'),uBlobU=U('uBlob'),uBlobOn=U('uBlobOn'),uBlobPh=U('uBlobPh'),uContact=U('uContact'),uProgG=U('uProg'),
   // the shared front + per-theme backdrop, declared in the field chunk and so
   // present in BOTH programs — these names must match the bU list in drawBg
@@ -4315,7 +4333,7 @@ function loop(now){
   gl.uniform1f(uFrontPhg, TS.blobPh); gl.uniform2fv(uFrontCg, TS.frontC);
   gl.uniform4fv(uBgInkAg, TS.bgA); gl.uniform4fv(uBgInkBg, TS.bgB);
   gl.uniform1i(uBgPatAg, TS.bgPatA); gl.uniform1i(uBgPatBg, TS.bgPatB);
-  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1fv(uMnIU,mnBuf); gl.uniform4fv(uTxtU,tgt.txt); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1fv(uMnIU,mnBuf); gl.uniform1f(uFoldGU, repGrowth(kLive, nLive)); gl.uniform4fv(uTxtU,tgt.txt); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
   // ---- SCISSOR #gl to the glass bbox (v4.3 perf; the v3-handoff lever). ----
   // Everything this program draws — glass body + rim + contact shadow — lives
   // inside the union of the drawn cells and the blob; every pixel outside it
