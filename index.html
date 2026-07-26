@@ -3668,14 +3668,15 @@ function themeFrame(parx, pary){
     // perturbs geometry that is already moving fast (the 3->4 morph runs in ~320px)
     // — that is the pop the owner could scrub back and forth. Mark it pending and
     // rebuild once the morph has settled, where the ease below hides the change.
-    pendingRebuild=true;
-    // Theme fonts change the TEXT METRICS, and the glass cells are measured
-    // from DOM rects — so every class swap re-derives the cells or the plates
-    // sit off their copy (measured: victorian's serif re-flowed the timeline
-    // rows ~a row-height off their engraved plates). The swap lands inside the
-    // copy-opacity trough, so the rebuild is invisible; the cell springs carry
-    // the geometry to the re-measured targets.
-    buildStates();
+    // NO re-measure here any more. Theme fonts change text metrics and the glass
+    // cells are measured from DOM rects, so this used to re-derive every cell at
+    // the swap — which moved mn, and with it R = 0.55*mn. That was the corner
+    // jump: a discrete resize at one exact scroll point, scrubbable back and
+    // forth. (An earlier attempt set pendingRebuild here to defer it, but called
+    // buildStates() on the very next line anyway, so the defer never ran; and
+    // deferring only moves the pop rather than removing it.) buildStates() now
+    // measures each state under ITS OWN theme, so the cells are correct for every
+    // state at all times and no swap can change them.
   }
 }
 
@@ -3812,8 +3813,7 @@ function buildStates(){
   // pads, and the .grid .cell / .rows .row CSS inset padding, which pulls the
   // INK inward while R() still measures the padded box — corner margin that
   // costs no frame width and no inter-plate gap. Don't strip either.
-  const items=[...secs[2].querySelectorAll('.grid .cell')].map(el=>R(el, mob?18:21, mob?13:21));
-  const rows =[...secs[3].querySelectorAll('.rows .row')].map(el=>R(el, mob?16:14, mob?9:9));
+  // items/rows are measured per-theme, down in the STATES assembly.
   // states 2 and 3 break into separate forms, so their eyebrow has no form to sit
   // in — give it its own label plate, at the SAME cell index in both so the plate
   // persists across the 2→3 morph instead of necking out of a panel.
@@ -3873,13 +3873,35 @@ function buildStates(){
     if(L>Rt) return R(secs[i],0,0);                       // no inked content — fall back
     return Rr({left:L,top:T,width:Rt-L,height:B-T}, mob?12:18, mob?18:26);
   };
-  STATES=[
-    {cells:oneForm(R(secs[0], mob?14:46, clear(mob?30:40))), k:0.16, corner:0.15, txt:txt(0)},   // identity — lens
-    {cells:oneForm(R(secs[1], mob?16:40, clear(mob?30:34))), k:0.16, corner:0.15, txt:txt(1)},   // method — card
-    {cells:fill([items[0],items[1],items[2],items[3],eyeb(2)]),             k:0.005, corner:0.06, txt:txt(2)}, // work — 4 SEPARATE panels + label plate
-    {cells:fill([rows[0],rows[1],rows[2],rows[3],rows[4],rows[5],eyeb(3)]), k:0.006, corner:0.05, txt:txt(3)}, // experience — SIX SEPARATE rows + label plate
-    {cells:oneForm(R(secs[4], mob?14:40, clear(mob?28:34))), k:0.16, corner:0.16, txt:txt(4)},   // contact — card
-  ];
+  // Measure every state under ITS OWN theme. The glass cells come from DOM rects
+  // and each theme ships its own fontSpec, so a box measured under a different
+  // theme is simply the wrong size. Measuring them all under whichever theme
+  // happened to be applied is what forced a re-measure at each class swap, and
+  // that re-measure moved mn — hence R = 0.55*mn — at one exact scroll point.
+  // Done this way each state's geometry is a constant of the layout, so scrolling
+  // can only ever LERP between two fixed boxes and the corner cannot step.
+  // Cost is five forced reflows per buildStates (load / resize / font load), all
+  // inside one frame with no paint between, not per-frame work.
+  const prevCls=curThemeClass;
+  const asTheme=(k,fn)=>{
+    if(curThemeClass) document.body.classList.remove(curThemeClass);
+    curThemeClass='theme-'+k; document.body.classList.add(curThemeClass);
+    void document.body.offsetWidth;                       // flush layout before reading rects
+    return fn();
+  };
+  const st=[];
+  st[0]=asTheme(0,()=>({cells:oneForm(R(secs[0], mob?14:46, clear(mob?30:40))), k:0.16, corner:0.15, txt:txt(0)}));
+  st[1]=asTheme(1,()=>({cells:oneForm(R(secs[1], mob?16:40, clear(mob?30:34))), k:0.16, corner:0.15, txt:txt(1)}));
+  st[2]=asTheme(2,()=>{
+    const items=[...secs[2].querySelectorAll('.grid .cell')].map(el=>R(el, mob?18:21, mob?13:21));
+    return {cells:fill([items[0],items[1],items[2],items[3],eyeb(2)]), k:0.005, corner:0.06, txt:txt(2)}; });
+  st[3]=asTheme(3,()=>{
+    const rows=[...secs[3].querySelectorAll('.rows .row')].map(el=>R(el, mob?16:14, mob?9:9));
+    return {cells:fill([rows[0],rows[1],rows[2],rows[3],rows[4],rows[5],eyeb(3)]), k:0.006, corner:0.05, txt:txt(3)}; });
+  st[4]=asTheme(4,()=>({cells:oneForm(R(secs[4], mob?14:40, clear(mob?28:34))), k:0.16, corner:0.16, txt:txt(4)}));
+  if(curThemeClass) document.body.classList.remove(curThemeClass);
+  curThemeClass=prevCls; if(prevCls) document.body.classList.add(prevCls);
+  STATES=st;
 }
 buildStates();
 
