@@ -10,7 +10,25 @@
 <meta property="og:type" content="website">
 <meta property="og:title" content="Frank Tinsley — real-time graphics engineer">
 <meta property="og:description" content="Real-time graphics engineer, 15+ years — interactive installations, shaders, and rendering engines. The background here is a live WebGL2 SDF renderer, not a video.">
+<!-- Share card. summary_large_image with NO image falls back to a bare text card,
+     which is what X was rendering. og:url matters too: without it some crawlers key
+     the card on the shared URL rather than the canonical one, so a link with a
+     ?v= cache-buster on it could be scraped as a separate page.
+     The image is a real capture of the hero at 1200x630, not a mockup — the card
+     should be the thing itself, which is the whole argument the page makes. JPEG,
+     because this is a photographic gradient: 71KB against 712KB as PNG.
+     Bump ?v= when the capture is re-shot; X caches cards hard. -->
+<link rel="canonical" href="https://franktinsley.github.io/">
+<meta property="og:url" content="https://franktinsley.github.io/">
+<meta property="og:site_name" content="Optical bench">
+<meta property="og:image" content="https://franktinsley.github.io/assets/og.jpg?v=1">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A glass panel rendered as a live signed-distance field, reading &quot;I build interactive systems that put on a show.&quot;">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://franktinsley.github.io/assets/og.jpg?v=1">
+<meta name="twitter:image:alt" content="A glass panel rendered as a live signed-distance field, reading &quot;I build interactive systems that put on a show.&quot;">
 <meta name="twitter:title" content="Frank Tinsley — real-time graphics engineer">
 <meta name="twitter:description" content="Real-time graphics engineer, 15+ years — interactive installations, shaders, and rendering engines. The background here is a live WebGL2 SDF renderer, not a video.">
 <style>
