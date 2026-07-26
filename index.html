@@ -853,6 +853,8 @@ float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return 
 const float REFR_GAIN = 1.8;  // how much of the true refracted exit offset to apply
 const float SOAP_R2   = 0.70710678;
 const float SOAP_TRL  = 0.21;   // TRON roll, x the soap roll — a crisp face, not a pillow
+const float SOAP_CUT  = 0.175;  // 45 corner chamfer, PERPENDICULAR cut, screen units
+                                // — matched to the frame's own chamfer so they stay parallel
 const float SOAP_TPR  = 0.34;   // end taper: how fast the end caps slope inward
 const float SOAP_TPX  = 0.81155; // = normalize(1,SOAP_TPR).x, for the gradient
 const float SOAP_TPY  = 0.58432; // = normalize(1,SOAP_TPR).y
@@ -969,9 +971,14 @@ void soapCell(int i, vec2 p, float px,
     // pass exactly through (b.x, 0) — the middle of the end cap — so the taper
     // starts at the silhouette and opens upward and downward from there. Flat top
     // and bottom are still held by sy; the ends slope in to meet them.
-    vec2  nr = normalize(vec2(1.0, SOAP_TPR));
-    float bd = nr.x*b.x;
-    float qd = dot(abs(rel), nr) - bd;
+    // A FIXED 45 CHAMFER, matched to the trace frame's own corner chamfer, so the two
+    // outlines are PARALLEL. The previous version was an angle-based end taper, whose
+    // cut depends on the panel's aspect — so it could never stay concentric with a
+    // frame whose corners are a constant on-screen size, and the silhouette read as a
+    // plain rounded rect beside crisply chamfered traces. A fixed perpendicular cut off
+    // the corner is aspect-independent and is the same construction the frame uses.
+    float bd = SOAP_R2*(b.x + b.y) - SOAP_CUT;
+    float qd = dot(abs(rel), vec2(SOAP_R2)) - bd;
     // Same shoulder width as the other two axes, so the sloped face rolls exactly
     // like the flat ones and every vertex it makes stays continuously curved.
     sd = soapShoulder(qd, w, dsd);
@@ -982,8 +989,8 @@ void soapCell(int i, vec2 p, float px,
   a4 = ar2*ar2;
   Rc = R;
   // grad picks up the diagonal too: d(qd)/dx = SOAP_R2*sign(x), same for y.
-  gxy = r2 * vec2((sx*dsx + sd*dsd*SOAP_TPX)*sign(rel.x),
-                  (sy*dsy + sd*dsd*SOAP_TPY)*sign(rel.y));
+  gxy = r2 * vec2((sx*dsx + sd*dsd*SOAP_R2)*sign(rel.x),
+                  (sy*dsy + sd*dsd*SOAP_R2)*sign(rel.y));
   float TH2 = TH*TH; th4 = TH2*TH2;
   mnO = mn;
 }
@@ -4059,9 +4066,11 @@ const shrunk=c=>c;
 const oneForm=c=>{ const a=[c]; while(a.length<NCELL) a.push(shrunk(c)); return a; };
 let STATES=[];
 let builtH=0, builtW=0;   // viewport H/W at the last buildStates() geometry measure (?diag)
+let builtGW=0, builtGH=0; // and the CANVAS rect, which is what Rr() normalises against
 let bsCount=0;
 function buildStates(){ bsCount++;
   builtH=document.documentElement.clientHeight; builtW=document.documentElement.clientWidth;
+  builtGW=GLR.width; builtGH=GLR.height;
   // pad kept tight (esp. the separation axis) so cssGap − 2·pad clears k — see
   // the .grid/.rows gaps in CSS. Then the settled k below is tiny → real gaps.
   // tighter padding on phones so single-form glass fits the narrow width and
@@ -4353,8 +4362,15 @@ function resize(){ dpr=Math.min(window.devicePixelRatio||1,2);
   // EVERY mobile toolbar movement and buildStates() re-measures every DOM rect, so
   // this was rebuilding the whole cell set mid-scroll. builtW/builtH already
   // recorded the box at the last measure — they were diagnostics; now they gate.
+  // Also gate on the CANVAS RECT. Rr() normalises every measured DOM rect against
+  // GLR, so if the canvas box changes the cells are stale even though the document
+  // box did not move — and the glass renders offset from the copy it was measured
+  // from. That is exactly what happens in an EMBEDDED browser (in-app webview),
+  // where persistent top and bottom chrome shifts the canvas without changing
+  // clientWidth/clientHeight, so the original gate skipped the rebuild.
   if(document.documentElement.clientWidth!==builtW ||
-     document.documentElement.clientHeight!==builtH) buildStates(); }
+     document.documentElement.clientHeight!==builtH ||
+     GLR.width!==builtGW || GLR.height!==builtGH) buildStates(); }
 addEventListener('resize',resize); resize();
 document.fonts && document.fonts.ready.then(buildStates);   // re-measure once text metrics settle
 // theme webfonts (Rajdhani/Exo 2/Playfair/Cormorant/Alegreya) can finish loading
