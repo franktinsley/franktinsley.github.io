@@ -122,7 +122,20 @@
      back and forth, ON A PHONE ONLY, and invisible to any headless test because
      a headless browser has no toolbar. */
   :root{ --vph:100vh; }
-  @supports (height:100lvh){ :root{ --vph:100lvh; } }
+  /* svh, NOT lvh. lvh is the viewport with browser UI RETRACTED — correct for
+     Safari, where the toolbar collapses as you scroll, and wrong for an EMBEDDED
+     webview whose chrome is permanent: there lvh is taller than anything the user
+     can actually see, so the layout box overflows and the tallest state runs off
+     the bottom past the readout. svh is the viewport with UI SHOWN, so content
+     always fits, and it is just as STABLE as lvh — it does not move when the
+     toolbar animates, which is the property that mattered when this stopped being
+     the live clientHeight. The cost is a little unused height in Safari once the
+     bar retracts; the content is centred, so that reads as margin, not as a bug.
+     #gl stays lvh deliberately — the canvas should cover everything the user can
+     see in either state, and it does not need to match this box: Rr() maps DOM
+     rects into canvas space using BOTH rects, so they may differ as long as the
+     measurement is current (which the GLR gate in resize() now guarantees). */
+  @supports (height:100svh){ :root{ --vph:100svh; } }
   #gl{ position:fixed; left:0; top:0; width:100vw; height:100vh; height:100lvh;
     display:block; z-index:1; }
 
@@ -260,6 +273,23 @@
      + label plate + the v4.6 corner-aware pads and gaps) otherwise overflows the
      viewport and slides under the nameplate/readout chrome. Compress the
      timeline typography so the whole stack sits clear of the bezel text. */
+  /* ---- SHORT VIEWPORTS (<=800px tall) — chiefly EMBEDDED BROWSERS. An in-app
+     webview keeps its top and bottom chrome permanently, so the usable height is
+     ~730px on a phone that reports 844. Measured, the two tallest states overflow
+     below 780px: state 2 (four work cards) and state 3 (six timeline rows). The
+     existing SE-class block starts at 660px, so a webview lands in the gap between
+     them and the last card runs off the bottom under the readout — which is exactly
+     what the owner saw. This closes that gap, and compresses state 2 as well; the
+     old block only ever handled state 3. */
+  @media (max-height: 800px){
+    .grid{ gap:12px; }
+    .grid .cell{ font-size:12.5px; line-height:1.34; }
+    .grid .cell h3{ font-size:13.5px; margin-bottom:3px; }
+    .rows{ gap:9px; }
+    .rows .row{ font-size:12px; line-height:1.28; }
+    h1{ font-size:clamp(26px,4.4vw,44px); }
+    .lede{ font-size:13.5px; line-height:1.44; }
+  }
   @media (max-width: 680px) and (max-height: 660px){
     /* wider column = fewer desc wrap lines; width chosen so plate + 16px glass
        pads still clears the 12px frame (80vw + 32px = 288 < 296 at w320) */
