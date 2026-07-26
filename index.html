@@ -892,17 +892,19 @@ void soapCell(int i, vec2 p, float px,
   // back off the two boxes and subtract it here. It jumps by the same amount, in
   // the opposite direction, at the same instant — so the corner comes out
   // continuous even though both terms are discontinuous.
-  // uFoldG is repGrowth(kLive, nLive) — the EXACT offset, straight from the JS that
-  // already computes it for compCells. Subtracting the box shrink instead was only
-  // an approximation of it (compCells shrinks per-axis by the measured edge push,
-  // capped at this), and it left about a quarter of the jump behind.
+  // NOTE: subtracting the fold growth from R was tried and REVERTED. It made the
+  // corner continuous, but wrong in kind: the growth is a constant offset of the
+  // FIELD, whereas R shapes the cell's 3D shoulder. Shrink one and inflate by the
+  // other and you get two separate rims — a visible inset tray inside the panel —
+  // instead of one continuous roll. The growth is dealt with at its source below
+  // (see oneForm/fill): stop folding coincident duplicates and there is none.
   // ONE rounding mechanism, structurally. There used to be a second source here:
   // R = max(SOAP_ROLL*mn, min(uCorner, 0.5*mn)). It could never actually win —
   // the request is clamped to 0.5*mn and SOAP_ROLL is 0.55 — so it was dead, but
   // it left a max() that would silently become a SECOND rounding regime the moment
   // anyone raised uCorner or lowered SOAP_ROLL. The roll IS the corner in this
   // family (corner curvature == edge curvature identically); nothing else may round.
-  float R  = max(SOAP_ROLL*mn - uFoldG, 0.16*SOAP_ROLL*mn);
+  float R  = SOAP_ROLL*mn;
   float w  = SOAP_SEAM*R;
   float S0 = R + 0.5*w;                       // shrink: edge silhouette lands on b
   float cap = 0.92*mn;
@@ -3857,7 +3859,20 @@ function compCells(cells, k, n, out){
 // one form: all NCELL cells coincident on the same intent box (unshrunk). The
 // repeated entries are deliberately the SAME array object, as they always were —
 // nothing mutates a STATES cell in place (cur.cells is a .slice() copy).
-const oneForm=c=>new Array(NCELL).fill(c);
+// PAD_IN — padding cells sit strictly INSIDE the form they pad, never coincident
+// with it. Exact coincidence is the worst case the fold has: sqPhi(0) is where the
+// chain's self-inflation is maximal (its own comment records 0.5563k at NCELL=6,
+// 0.6244k at 8), so eight identical cells inflated the field by ~0.6k and compCells
+// then had to shrink every box to cancel it. That cancellation fixes the EDGE but
+// not the corner, and the growth is a function of nLive — an INTEGER — so the
+// corner stepped every time the count did. That was the corner jump.
+// A cell strictly inside contributes NOTHING: its field is shallower everywhere on
+// the outer surface, so (f_i - g)/k is positive there and sqPhi returns zero. No
+// inflation, nothing for compCells to cancel, and no step when the count changes
+// because what drops out was invisible anyway.
+const PAD_IN=0.30;
+const shrunk=c=>[c[0], c[1], c[2]*PAD_IN, c[3]*PAD_IN];
+const oneForm=c=>{ const a=[c]; while(a.length<NCELL) a.push(shrunk(c)); return a; };
 let STATES=[];
 let builtH=0, builtW=0;   // viewport H/W at the last buildStates() geometry measure (?diag)
 let bsCount=0;
@@ -3895,7 +3910,9 @@ function buildStates(){ bsCount++;
   // long, but a state that OVERFLOWS it now says so instead of losing a panel.
   const fill=(a)=>{ a=a.slice();
     if(a.length>NCELL) console.warn('[cells] state needs '+a.length+' > NCELL='+NCELL+'; raise NCELL — '+(a.length-NCELL)+' form(s) would render with no glass');
-    while(a.length<NCELL) a.push(a[a.length-1]); return a.slice(0,NCELL); };
+    const last=a[a.length-1];
+    while(a.length<NCELL) a.push(shrunk(last));   // interior, not coincident — see PAD_IN
+    return a.slice(0,NCELL); };
   // kSettle: near-zero for SEPARATED states so panels/rows end up genuinely
   // distinct at rest; the gooey necking happens only mid-morph (GOO bump below).
   // corner values survive as a LOWER bound only: the soap family's roll radius
