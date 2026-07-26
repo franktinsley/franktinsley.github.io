@@ -3072,8 +3072,8 @@ V4_THEMES.register({
     // brass accent (links, eyebrow, led, ticks). Measured: #d8a24a read 3.69
     // on the lit state-2 panels — a body-copy LINK below the 4.5 gate. This
     // lighter honey-brass measures ~5 there and stays unmistakably brass.
-    '--cy': '#efc06a',
-    '--cy-soft': 'rgba(239,192,106,0.55)',
+    '--cy': '#f4d38f',
+    '--cy-soft': 'rgba(244,211,143,0.55)',
     '--line': 'rgba(199,155,88,0.16)',
     // Humanist serif voice. Alegreya (a humanist serif designed for long-form
     // print) carries the theme; the fallbacks keep the same warmth with zero
@@ -3608,9 +3608,9 @@ function compCells(cells, k, n, out){
 // nothing mutates a STATES cell in place (cur.cells is a .slice() copy).
 const oneForm=c=>new Array(NCELL).fill(c);
 let STATES=[];
-let builtH=0;   // layout-viewport height the current STATES geometry was measured at (?diag)
+let builtH=0, builtW=0;   // viewport H/W at the last buildStates() geometry measure (?diag)
 function buildStates(){
-  builtH=document.documentElement.clientHeight;
+  builtH=document.documentElement.clientHeight; builtW=document.documentElement.clientWidth;
   // pad kept tight (esp. the separation axis) so cssGap − 2·pad clears k — see
   // the .grid/.rows gaps in CSS. Then the settled k below is tiny → real gaps.
   // tighter padding on phones so single-form glass fits the narrow width and
@@ -3787,7 +3787,17 @@ function resize(){ dpr=Math.min(window.devicePixelRatio||1,2);
   syncChrome();
   GLR=canvas.getBoundingClientRect();
   W=Math.round(GLR.width*dpr); H=Math.round(GLR.height*dpr);
-  canvas.width=W; canvas.height=H; gl.viewport(0,0,W,H); r_res.textContent=`${(W*H/1e6).toFixed(1)} Mpx`; buildStates(); }
+  canvas.width=W; canvas.height=H; gl.viewport(0,0,W,H); r_res.textContent=`${(W*H/1e6).toFixed(1)} Mpx`;
+  // CORNER-JUMP FIX: re-measuring the DOM changes cell sizes, and the corner radius
+  // is 0.55*mn — so a rebuild visibly snaps every corner. Mobile toolbars collapse
+  // at the scroll extremes, firing height-only resizes; rebuilding on those made the
+  // corners jump/jitter after scrolling to the top or bottom. Rebuild only on a WIDTH
+  // change or a height change bigger than any toolbar (>120px = rotation/real resize);
+  // the tiny transient text drift under a collapsing toolbar is invisible next to the
+  // corner snap it replaces. Font-load and theme-swap rebuilds are unaffected (they
+  // call buildStates() directly).
+  const cw=document.documentElement.clientWidth, ch=document.documentElement.clientHeight;
+  if (cw!==builtW || Math.abs(ch-builtH)>120) buildStates(); }
 addEventListener('resize',resize); resize();
 document.fonts && document.fonts.ready.then(buildStates);   // re-measure once text metrics settle
 // theme webfonts (Rajdhani/Exo 2/Playfair/Cormorant/Alegreya) can finish loading
