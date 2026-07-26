@@ -698,6 +698,16 @@ precision highp float;
 uniform vec2  uRes;
 uniform float uTime;
 uniform vec4  uCells[NCELL];   // xy = center, zw = half-size (y-normalized units)
+uniform float uMnI[NCELL];     // INTENT mn per cell (min half-size before compensation).
+                               // uCells.zw is the COMPENSATED box, whose shrink cancels the
+                               // fold chain's growth so the union EDGE lands on the intent.
+                               // That shrink depends on nLive, which is an integer: when it
+                               // steps (7->1 at the end of the 3->4 morph) the compensated box
+                               // jumps even though the union edge does not. Deriving the roll
+                               // from it therefore snapped the corner 0.163->0.214 in ONE frame
+                               // — the corner-jump bug. The roll is a DESIGN quantity and must
+                               // follow the intent, which is continuous; the compensated box
+                               // still places the edge. Measured before/after, see the commit.
 uniform vec4  uTxt;            // measured INKED copy bbox, same units — TRON routes its
                                // emission around this (NOTE #6). Layout space, like the
                                // cells: G.pw is already p-par and the DOM copy carries the
@@ -822,9 +832,16 @@ void soapCell(int i, vec2 p, float px,
               out float c4, out float a4, out float Rc, out vec2 gxy, out float th4,
               out float mnO){
   vec2 b = uCells[i].zw;
-  float mn = max(min(b.x, b.y), 1.5*px);
-  float rc = min(uCorner, 0.5*mn);
-  float R  = max(SOAP_ROLL*mn, rc);
+  // mn comes from the INTENT box, never the compensated one — see uMnI. b (compensated)
+  // still places the edge below via bs = b - S0, so the silhouette is unchanged.
+  float mn = max(uMnI[i], 1.5*px);
+  // ONE rounding mechanism, structurally. There used to be a second source here:
+  // R = max(SOAP_ROLL*mn, min(uCorner, 0.5*mn)). It could never actually win —
+  // the request is clamped to 0.5*mn and SOAP_ROLL is 0.55 — so it was dead, but
+  // it left a max() that would silently become a SECOND rounding regime the moment
+  // anyone raised uCorner or lowered SOAP_ROLL. The roll IS the corner in this
+  // family (corner curvature == edge curvature identically); nothing else may round.
+  float R  = SOAP_ROLL*mn;
   float w  = SOAP_SEAM*R;
   float S0 = R + 0.5*w;                       // shrink: edge silhouette lands on b
   float cap = 0.92*mn;
@@ -3335,7 +3352,7 @@ const U=n=>gl.getUniformLocation(prog,n);
 // uLight is RETIRED (v4.5: the key light is the shader const KEY_L — one sun,
 // not a knob). The lookup stays (null) so tests/glass-zoom.js's unguarded
 // uniform3f(uLight,...) remains a legal no-op instead of a ReferenceError.
-const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
+const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
   uMatA=U('uMatA[0]'),uMatB=U('uMatB[0]'),uMatBlob=U('uMatBlob[0]'),uBlobU=U('uBlob'),uBlobOn=U('uBlobOn'),uBlobPh=U('uBlobPh'),uContact=U('uContact'),uProgG=U('uProg'),
   // the shared front + per-theme backdrop, declared in the field chunk and so
   // present in BOTH programs — these names must match the bU list in drawBg
@@ -3859,6 +3876,7 @@ const REBUILD_MS=260;
 let reFrom=null, reAt=-1e9, pendingRebuild=false;
 function noteRebuild(){ reFrom=cur.cells.map(c=>c.slice()); reAt=performance.now(); }
 const cellBuf=new Float32Array(NCELL*4);   // exactly what uniform4fv(uCells,...) uploads
+const mnBuf=new Float32Array(NCELL);       // INTENT mn per cell — drives the roll (see uMnI)
 function lerpState(a,b,t){
   const out={cells:[],k:a.k+(b.k-a.k)*t,corner:a.corner+(b.corner-a.corner)*t,
              txt:a.txt.map((v,j)=>v+(b.txt[j]-v)*t)};
@@ -4094,6 +4112,9 @@ function loop(now){
   // cur.cells are INTENT boxes; the buffer gets the fold-chain-compensated
   // cells so the drawn silhouette lands on the intent (see compCells).
   compCells(cur.cells, kLive, nLive, cellBuf);
+  // The roll follows the INTENT box, which moves continuously with scroll, so it
+  // cannot inherit compCells' nLive-dependent step (the corner-jump bug).
+  for(let i=0;i<NCELL;i++) mnBuf[i]=Math.min(cur.cells[i][2], cur.cells[i][3]);
   // follow the cursor while active; when idle past IDLE_MS, ease back to center
   // (slower rate) so the parallax + swell settle to the default resting pose
   const active=(now-lastActive)<IDLE_MS;
@@ -4159,7 +4180,7 @@ function loop(now){
   gl.uniform1f(uFrontPhg, TS.blobPh); gl.uniform2fv(uFrontCg, TS.frontC);
   gl.uniform4fv(uBgInkAg, TS.bgA); gl.uniform4fv(uBgInkBg, TS.bgB);
   gl.uniform1i(uBgPatAg, TS.bgPatA); gl.uniform1i(uBgPatBg, TS.bgPatB);
-  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform4fv(uTxtU,tgt.txt); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1fv(uMnIU,mnBuf); gl.uniform4fv(uTxtU,tgt.txt); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
   // ---- SCISSOR #gl to the glass bbox (v4.3 perf; the v3-handoff lever). ----
   // Everything this program draws — glass body + rim + contact shadow — lives
   // inside the union of the drawn cells and the blob; every pixel outside it
