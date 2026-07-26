@@ -58,7 +58,13 @@
   html{ margin:0; background-color:var(--bg-edge); }
   body{ margin:0; background:transparent; color:var(--ink); font-family:var(--sans);
     overflow-x:hidden; }
-  #bg{ position:absolute; left:0; width:100vw; display:block; z-index:0; }
+  /* B2 JITTER FIX: #bg was position:absolute and JS-repositioned every frame via
+     style.top to follow the scroll. Native scrolling runs on the COMPOSITOR; a
+     main-thread rAF-positioned element lags it, which is exactly the judder that
+     was reported. #gl already solved this ("FIXED, so the compositor pins it") —
+     #bg now does the same. It never moves; the shader's uScroll carries 100% of
+     the scrolling motion, so the field still scrolls, just smoothly. */
+  #bg{ position:fixed; left:0; top:0; width:100vw; display:block; z-index:0; }
   /* #gl — the glass. FIXED, so the compositor pins it exactly like .frame, which is
      what stopped it bouncing. Transparent except for the glass and its shadow. */
   #gl{ position:fixed; left:0; top:0; width:100vw; height:100vh; height:100lvh;
@@ -767,6 +773,7 @@ float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return 
 // uCorner is honored as a LOWER bound: R = max(SOAP_ROLL*mn, clamped uCorner).
 // The roll IS the corner in this family, and SOAP_ROLL > 0.5 means R dominates
 // every production-clamped request — there is no clamp-boundary regime.
+const float REFR_GAIN = 1.8;  // how much of the true refracted exit offset to apply
 const float SOAP_ROLL = 0.55;   // roll radius R = SOAP_ROLL*mn (the softness knob)
 const float SOAP_SEAM = 1.00;   // seam-band width w = SOAP_SEAM*R (measured best)
 const float SOAP_THK  = 0.62;   // TH = SOAP_THK*mn — production glass thickness
@@ -2211,16 +2218,61 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
   // the opaque metals/lacquer/terracotta skip the 8-tap loop entirely.
   vec3 refr = vec3(0.0);
   vec3 tintS = tint0 * P.tint;
+  // §4.1 view vector, hoisted: the interior leg below needs it too.
+  const float VIEW_FAN=0.42;   // 0 = old hardcoded (0,0,1); larger = more spread
+  vec2 fragP=(2.0*gl_FragCoord.xy-uRes)/uRes.y;
+  vec3 Vv=normalize(vec3(-fragP*VIEW_FAN, 1.0));   // surface -> eye
   if (trans > 0.001){
     float blurR = min(0.0024, 0.06*g.mn)*(0.45+1.7*g.rimP)*(max(P.rough,0.02)/0.64);
     const float GA = 2.399963;
+    // §4.3 REAL INTERIOR LEG, closed-form (no fixed point needed).
+    // The soap solid is SYMMETRIC about z=0 (the field uses |z|), so for an
+    // orthographic ray the back surface is the front mirrored: h_back = -h(x,y)
+    // and n_back = vec3(n.xy, -n.z). Both are already solved — so the full
+    // two-surface path costs ZERO new solves and zero iteration (better than the
+    // handoff's 3-step fixed point, and it keeps the 120fps gate).
+    //   refract IN through n  ->  traverse the real thickness 2h  ->  refract OUT
+    //   through the mirrored back normal  ->  offset the backdrop sample by where
+    //   that exit ray actually lands.
+    // This is what reads as THICK: the see-through image is displaced and bent by
+    // the real geometry (edges bend hard, the crown barely), instead of the old
+    // fixed screen-space offset that bent everything the same amount.
+    const float IOR=1.48;
+    vec3 nF   = g.n;                                   // front normal (surface->out)
+    vec3 dIn  = refract(-Vv, nF, 1.0/IOR);             // into the glass
+    vec2 exitOff = vec2(0.0);
+    if (dot(dIn,dIn) > 1e-6){
+      // travel to the back surface: symmetric solid => path length is 2h/|dz|
+      float pathL = (2.0*G.dep)/max(abs(dIn.z), 0.25);
+      vec2 hitXY  = dIn.xy*pathL;                      // lateral drift inside the glass
+      vec3 nB     = vec3(nF.xy, -nF.z);                // mirrored back surface
+      vec3 dOut   = refract(dIn, -nB, IOR);            // out into the world (0 on TIR)
+      // where the exiting ray meets the backdrop plane behind the glass
+      vec2 exitDrift = (dot(dOut,dOut) > 1e-6)
+                     ? dOut.xy*(G.dep*1.6/max(abs(dOut.z),0.30))
+                     : reflect(dIn, -nB).xy*G.dep*0.8; // TIR: bounce back inside
+      // Skins that print dense copy carry interior-density compression (comp); scale
+      // the refracted displacement down by it so the extra interior structure never
+      // costs legibility (§5: the thickness cue survives moderation, the highlights don't).
+      exitOff = (hitXY + exitDrift)*REFR_GAIN*(1.0 - 0.55*clamp(comp,0.0,1.0));
+    }
     for(int i=0;i<8;i++){
       float fi=float(i); float rr=sqrt((fi+0.5)/8.0)*blurR; float ang=fi*GA+g.ja;
-      refr += fieldFine(g.spC + vec2(cos(ang),sin(ang))*rr + P.ripple, g.ss, uScroll, g.bgF);
+      refr += fieldFine(g.spC + vec2(cos(ang),sin(ang))*rr + P.ripple + exitOff, g.ss, uScroll, g.bgF);
     }
     refr/=8.0;
-    refr += fieldCoarse(g.spC + P.ripple, uScroll, g.bgF);
-    refr *= tintS;
+    refr += fieldCoarse(g.spC + P.ripple + exitOff, uScroll, g.bgF);
+    // §4.2 FREE THICKNESS (thick-glass port): Beer-Lambert over the REAL path length
+    // 2h. The soap solid is symmetric about z=0, so an orthographic ray enters at
+    // +h and exits at -h — h = g.thk*TH is already solved (G.dep), so this costs ZERO
+    // new solves. tintS is the per-unit-length transmission colour; absorbing over
+    // 2h makes the thin rim read clear and the thick crown darker/more saturated — a
+    // genuine path-length thickness cue instead of a flat tinted card. THICK_K sets
+    // the depth at which the crown matches the old flat tint (continuity). Darkening
+    // with thickness also HELPS legibility (less bright backdrop bleeds through copy).
+    const float THICK_K=4.0;
+    vec3 absorb=-log(clamp(tintS, vec3(0.02), vec3(0.999)));
+    refr *= exp(-absorb*(THICK_K*2.0*G.dep));
     // INTERIOR DENSITY — kept from the site engine (the lab never printed text on
     // its glass). A Reinhard curve on the peaks only, so the backdrop still
     // refracts through the body while its highlights stop erasing the copy.
@@ -2235,7 +2287,8 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
   // fwidth(n) specular AA into the roughness, in quadrature.
   float rough=clamp(sqrt(P.rough*P.rough + 6.25*P.nvar*P.nvar + 6.25*g.rghAA*g.rghAA),0.0,1.0);
 
-  vec3 V=vec3(0.0,0.0,1.0);
+  // §4.1 per-pixel view vector — computed above (Vv), shared with the interior leg.
+  vec3 V=Vv;
   vec3 Nsp=nG, Sdir=vec3(0.0);
   if(abs(P.aniso)>0.002){
     vec3 t0=vec3(P.aniT,0.0);
@@ -3289,7 +3342,7 @@ const BG_M=200;
 let bgDocTop=0;
 function layoutBg(){
   if(!bgl) return;
-  const vh=vpH(), cssH=vh+2*BG_M;
+  const vh=vpH(), cssH=vh+2*BG_M;   // BG_M overhang retained: covers rubber-band overscroll
   // clamp at 0: nothing paints above the document origin, so at the very top of the
   // page the status-bar band falls back to the page background-color.
   // Clamp to the DOCUMENT. #bg is absolutely positioned, so it contributes to the
@@ -3297,9 +3350,11 @@ function layoutBg(){
   // follows the scroll, and the page grows forever as you chase it.
   // The cost of clamping is that the outermost ~200px at each end of the document
   // fall back to background-color in the bands, which is also the case at scroll 0.
-  const docH=document.getElementById('scroll').offsetHeight;
-  bgDocTop=Math.max(0, Math.min(Math.round(scrollY-BG_M), Math.max(0, docH-cssH)));
-  bgCanvas.style.top=bgDocTop+'px';
+  // FIXED-position now: the canvas is pinned to the viewport and never repositioned
+  // per frame (that main-thread move was the jitter). Offset up by BG_M so the
+  // overhang covers overscroll at both ends; constant, so it costs no layout.
+  bgDocTop=-BG_M;
+  if(bgCanvas.style.top!==bgDocTop+'px') bgCanvas.style.top=bgDocTop+'px';
   bgCanvas.style.height=cssH+'px';
   const w=Math.round(innerWidth*dpr), h=Math.round(cssH*dpr);
   if(bgCanvas.width!==w||bgCanvas.height!==h){ bgCanvas.width=w; bgCanvas.height=h; }
@@ -3487,6 +3542,12 @@ function themeFrame(parx, pary){
     if(curThemeClass) document.body.classList.remove(curThemeClass);
     document.body.classList.add(cls);
     curThemeClass=cls;
+    // B1: DEFER the re-measure out of the morph. buildStates() re-derives cells from
+    // DOM rects; the themed text metrics change them, and firing that mid-morph
+    // perturbs geometry that is already moving fast (the 3->4 morph runs in ~320px)
+    // — that is the pop the owner could scrub back and forth. Mark it pending and
+    // rebuild once the morph has settled, where the ease below hides the change.
+    pendingRebuild=true;
     // Theme fonts change the TEXT METRICS, and the glass cells are measured
     // from DOM rects — so every class swap re-derives the cells or the plates
     // sit off their copy (measured: victorian's serif re-flowed the timeline
@@ -3679,6 +3740,16 @@ buildStates();
 
 // spring-smoothed live cell params
 let cur={ cells:STATES[0].cells.map(c=>c.slice()), k:STATES[0].k, corner:STATES[0].corner };
+// B1 CORNER-JUMP FIX: buildStates() re-measures DOM rects, and the theme class swap
+// mid-morph (u>=SWAP) changes text metrics -> cell sizes change -> the corner
+// (R = 0.55*mn) SNAPPED. The original design hid this behind the global cell spring,
+// but that spring caused a ~800ms post-fling settle everywhere and was removed. So
+// instead of a permanent global lag, ease ONLY across a rebuild: snapshot the live
+// geometry when one fires and blend off it over REBUILD_MS. Cells still track scroll
+// exactly the rest of the time.
+const REBUILD_MS=260;
+let reFrom=null, reAt=-1e9, pendingRebuild=false;
+function noteRebuild(){ reFrom=cur.cells.map(c=>c.slice()); reAt=performance.now(); }
 const cellBuf=new Float32Array(NCELL*4);   // exactly what uniform4fv(uCells,...) uploads
 function lerpState(a,b,t){
   const out={cells:[],k:a.k+(b.k-a.k)*t,corner:a.corner+(b.corner-a.corner)*t};
@@ -3865,7 +3936,16 @@ function loop(now){
   cur.k+=(tgt.k-cur.k)*sp; cur.corner+=(tgt.corner-cur.corner)*sp;
   // cells track the (already mt-eased) target DIRECTLY — the extra spring was pure
   // lag that made the corner (0.55*mn) settle for ~800ms after a fling stopped.
-  for(let i=0;i<NCELL;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]=tgt.cells[i][j]; } }
+  // run any deferred re-measure only once the morph has settled (see pendingRebuild)
+  if(pendingRebuild && morphAmt<0.02){ pendingRebuild=false; noteRebuild(); buildStates(); }
+  const reT=(now-reAt)/REBUILD_MS;
+  if(reFrom && reT<1.0 && !reduced){
+    const e=reT*reT*(3.0-2.0*reT);   // smoothstep off the pre-rebuild geometry
+    for(let i=0;i<NCELL;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]=reFrom[i][j]+(tgt.cells[i][j]-reFrom[i][j])*e; } }
+  } else {
+    if(reFrom && reT>=1.0) reFrom=null;
+    for(let i=0;i<NCELL;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]=tgt.cells[i][j]; } }
+  }
   // goo bump: add blend only mid-morph, so forms neck/flow while transitioning
   // but end up genuinely separate (k -> its small settle value) at rest.
   // Computed HERE (not at upload) because compCells must see the same k the
