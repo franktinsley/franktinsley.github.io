@@ -67,6 +67,17 @@
   #bg{ position:fixed; left:0; top:0; width:100vw; display:block; z-index:0; }
   /* #gl — the glass. FIXED, so the compositor pins it exactly like .frame, which is
      what stopped it bouncing. Transparent except for the glass and its shadow. */
+  /* --vph is the LAYOUT box height, and it must be the LARGE viewport — the same
+     one #gl is sized in below. It used to be written from JS as the LIVE
+     clientHeight, which on a phone moves every time the browser toolbar
+     collapses or expands during a scroll. So #vp (the text) re-flowed against a
+     moving box while #gl (the glass) stayed pinned to lvh — the two disagreed
+     mid-scroll — and the resize that came with it rebuilt every cell, and with
+     them R = 0.55*mn. A geometry pop at one exact scroll position, scrubbable
+     back and forth, ON A PHONE ONLY, and invisible to any headless test because
+     a headless browser has no toolbar. */
+  :root{ --vph:100vh; }
+  @supports (height:100lvh){ :root{ --vph:100lvh; } }
   #gl{ position:fixed; left:0; top:0; width:100vw; height:100vh; height:100lvh;
     display:block; z-index:1; }
 
@@ -4095,13 +4106,21 @@ addEventListener('scroll',syncChrome,{passive:true});
 function resize(){ dpr=Math.min(window.devicePixelRatio||1,2);
   // Write --vph BEFORE measuring: it resizes #vp, and a stale read here would
   // build the states against the previous layout.
-  document.documentElement.style.setProperty('--vph', vpH()+'px');
+  // Only when lvh is unavailable — otherwise CSS owns --vph and it is the stable
+  // large viewport. Writing the live height here is what let the toolbar move it.
+  if(!(window.CSS && CSS.supports && CSS.supports('height','100lvh')))
+    document.documentElement.style.setProperty('--vph', vpH()+'px');
   SA=readSafeArea();
   syncChrome();
   GLR=canvas.getBoundingClientRect();
   W=Math.round(GLR.width*dpr); H=Math.round(GLR.height*dpr);
   canvas.width=W; canvas.height=H; gl.viewport(0,0,W,H); r_res.textContent=`${(W*H/1e6).toFixed(1)} Mpx`;
-buildStates(); }
+  // Re-derive GEOMETRY only when the layout box actually changed. resize() fires on
+  // EVERY mobile toolbar movement and buildStates() re-measures every DOM rect, so
+  // this was rebuilding the whole cell set mid-scroll. builtW/builtH already
+  // recorded the box at the last measure — they were diagnostics; now they gate.
+  if(document.documentElement.clientWidth!==builtW ||
+     document.documentElement.clientHeight!==builtH) buildStates(); }
 addEventListener('resize',resize); resize();
 document.fonts && document.fonts.ready.then(buildStates);   // re-measure once text metrics settle
 // theme webfonts (Rajdhani/Exo 2/Playfair/Cormorant/Alegreya) can finish loading
