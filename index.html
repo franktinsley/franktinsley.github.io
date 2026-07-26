@@ -728,6 +728,7 @@ uniform float uProg;       // global scroll progress (field's archetype morph)
 // procedural envAt() dome. Decode is L = rgb*a*uEnvRange; roughness picks a mip
 // via uEnvMaxLod. (envMap/envDir defined below, next to envAt.)
 uniform sampler2D uEnv; uniform float uEnvRange, uEnvMaxLod;
+uniform float uEnvScroll;  // normalised scroll 0..1 — turns the studio as you scroll
 // uSpreadT / uFrontR / uFrontPh / uFrontC and the backdrop's per-theme ink and
 // pattern ids are declared in the shared field chunk (spliced in below), so the
 // glass and the background canvas read ONE front from ONE declaration.
@@ -2191,7 +2192,15 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
   // medium-motion phase; here the room is turned only by each skin's own rot, so
   // the reflection lands where the material was directed. gEnvRot never leaves
   // this call — envDir reads only the four trig globals.
-  gCP = 1.0; gSP = 0.0; gCY = cos(rot); gSY = sin(rot);
+  // DYNAMIC LIGHTING: the studio turns with the scroll and leans with the pointer,
+  // so reflections/thin-film sweep in real time. Scroll drives YAW over ~2.3 rad
+  // (well off the env's ~72deg horizon harmonic, so a sweep never lands back on an
+  // equivalent room); the pointer adds a little yaw + a CLAMPED pitch so the HDRI
+  // floor can never swing overhead. Per-skin `rot` stays the base longitude.
+  float envYaw   = rot + uEnvScroll*2.3 + uPar.x*0.9;
+  float envPitch = clamp(-uPar.y*0.6, -0.32, 0.32);
+  gCY = cos(envYaw); gSY = sin(envYaw);
+  gCP = cos(envPitch); gSP = sin(envPitch);
   // lab Geo, built from the site's one geometry solve
   Geo G; G.dep=g.thk*SOAP_THK*g.mn; G.pw=g.pp; G.nrm=g.n; G.thk=g.thk; G.px=g.px; G.ndv=g.nz; G.mnp=g.mn; G.cw=g.cw;
   Pat P = patMat(id, seam, gain, logt, G, alb0, rough0, metal0);
@@ -3207,7 +3216,7 @@ const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uNu=U('uN'),uCorner=
   // present in BOTH programs — these names must match the bU list in drawBg
   uSpreadT=U('uSpreadT'),uFrontRg=U('uFrontR'),uFrontPhg=U('uFrontPh'),uFrontCg=U('uFrontC'),
   uBgInkAg=U('uBgInkA'),uBgInkBg=U('uBgInkB'),uBgPatAg=U('uBgPatA'),uBgPatBg=U('uBgPatB'),
-  uEnv=U('uEnv'),uEnvRange=U('uEnvRange'),uEnvMaxLod=U('uEnvMaxLod');
+  uEnv=U('uEnv'),uEnvRange=U('uEnvRange'),uEnvMaxLod=U('uEnvMaxLod'),uEnvScroll=U('uEnvScroll');
 gl.enable(gl.BLEND);
 gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -3932,7 +3941,7 @@ function loop(now){
   gl.uniform1f(uFrontPhg, TS.blobPh); gl.uniform2fv(uFrontCg, TS.frontC);
   gl.uniform4fv(uBgInkAg, TS.bgA); gl.uniform4fv(uBgInkBg, TS.bgB);
   gl.uniform1i(uBgPatAg, TS.bgPatA); gl.uniform1i(uBgPatBg, TS.bgPatB);
-  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive);
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,progP);
   // ---- SCISSOR #gl to the glass bbox (v4.3 perf; the v3-handoff lever). ----
   // Everything this program draws — glass body + rim + contact shadow — lives
   // inside the union of the drawn cells and the blob; every pixel outside it
