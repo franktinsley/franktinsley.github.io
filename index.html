@@ -113,7 +113,17 @@
   .stage{ position:absolute; inset:0; z-index:1; display:grid; place-items:center; pointer-events:none; }
   .state{ grid-area:1/1; width:min(760px,86vw); text-align:center; opacity:0; will-change:opacity,transform; }
   .state.on{ pointer-events:auto; }
-  .state::before{ content:""; position:absolute; inset:-14% -10% -18%; z-index:-1; pointer-events:none;
+  /* The legibility scrim hangs off .stage, NOT .state. It used to be .state::before,
+     which put it inside the state's own opacity GROUP -- so the scrim faded in
+     lockstep with the copy it exists to protect and mid-morph contrast collapsed
+     roughly quadratically (~1.6:1 measured on the 3->4 approach, against 4.65:1
+     settled). .state is unpositioned, so this pseudo-element's containing block was
+     already .stage; hoisting it here keeps the geometry identical to the pixel while
+     taking it out of the fade. --so is driven independently and LEADS the copy at
+     both ends, so the wash is at full strength before any type appears and is still
+     up after it is gone. One scrim now serves whichever state is showing. */
+  .stage::before{ content:""; position:absolute; inset:-14% -10% -18%; z-index:-1; pointer-events:none;
+    opacity:var(--so,0);
     /* a wash under the copy only — the glass keeps its own density (see the shader's
        interior compression); this just stops the lit dot field reaching the type.
        Reaches wider than the text block so runs at the far ends of a wide row (the
@@ -612,7 +622,7 @@ vec3 field(vec2 sp, vec2 m, float scr){
         Konami's PSX-based arcade platform for MiSTer — ~22,000 lines of RTL in about a month, in a domain
         I had no background in. AI-accelerated workflow, verified frame-accurate against MAME by automated
         frame-diff on real hardware, not by eye.
-        <a href="https://github.com/fabricore-eng/System573_MiSTer">source ↗</a></p></div>
+        <a href="https://github.com/fabricore-eng/System573_MiSTer">source&nbsp;↗</a></p></div>
       <div class="cell"><h3>This page</h3><p>The background you're reading over: one signed-distance field,
         no libraries, lit by a single baked studio environment, tracking your cursor or your finger at full
         device resolution. Two WebGL2 programs draw it — one scrolls, one is pinned — sharing the field
@@ -688,6 +698,10 @@ precision highp float;
 uniform vec2  uRes;
 uniform float uTime;
 uniform vec4  uCells[NCELL];   // xy = center, zw = half-size (y-normalized units)
+uniform vec4  uTxt;            // measured INKED copy bbox, same units — TRON routes its
+                               // emission around this (NOTE #6). Layout space, like the
+                               // cells: G.pw is already p-par and the DOM copy carries the
+                               // same parallax, so the two agree without correcting for it.
 // How many of those cells are DISTINCT this frame. NCELL is the budget; uN is the
 // bill. Every state pads its cell list out to NCELL by repeating its last form, so
 // the tail is always an exact duplicate run — and folding an exact duplicate does
@@ -2122,10 +2136,17 @@ Pat patTron(vec3 seam, float gain, Geo G, vec3 a0, float r0, float m0){
   // Masked in G.pw directly: the trace layout is authored in absolute G.pw coords
   // centred near the panel, whereas G.cw is the dominant-form centre in a different
   // (pre-parallax) space — using it put the ellipse in the wrong place entirely.
-  const float TRN_TXW=0.78, TRN_TXH=0.62, TRN_CLR=0.10;
-  vec2  txr = vec2(G.pw.x/TRN_TXW, G.pw.y/TRN_TXH);
-  float txm = smoothstep(0.55, 1.10, length(txr));   // 0 over the copy, 1 outside it
-  o.emis *= mix(TRN_CLR, 1.0, txm);
+  // Driven by the MEASURED copy bbox (uTxt), not by fixed radii. The old ellipse
+  // cleared only |pw.y|<0.341 while the lede filled almost the whole panel, so in
+  // a settled state glowing traces crossed nine consecutive lines of body copy and
+  // a solder pad sat under a heading. An ellipse cannot cover a rectangular block
+  // without either spilling past the rim or leaving the line ends exposed — so use
+  // a rounded-rect distance, and take the interior to ZERO rather than 10%: a tenth
+  // of a hot pad is still the brightest thing in a column of type.
+  const float TRN_TXR=0.06, TRN_TXF=0.10;   // mask corner radius, falloff width
+  vec2  q  = abs(G.pw - uTxt.xy) - uTxt.zw + TRN_TXR;
+  float td = length(max(q,vec2(0.0))) + min(max(q.x,q.y),0.0) - TRN_TXR;
+  o.emis *= smoothstep(0.0, TRN_TXF, td);   // 0 over the copy, 1 clear of it
   return o; }
 
 // ---------- 5 KILN (v7) ------------------------------------------------------
@@ -3314,7 +3335,7 @@ const U=n=>gl.getUniformLocation(prog,n);
 // uLight is RETIRED (v4.5: the key light is the shader const KEY_L — one sun,
 // not a knob). The lookup stays (null) so tests/glass-zoom.js's unguarded
 // uniform3f(uLight,...) remains a legal no-op instead of a ReferenceError.
-const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
+const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
   uMatA=U('uMatA[0]'),uMatB=U('uMatB[0]'),uMatBlob=U('uMatBlob[0]'),uBlobU=U('uBlob'),uBlobOn=U('uBlobOn'),uBlobPh=U('uBlobPh'),uContact=U('uContact'),uProgG=U('uProg'),
   // the shared front + per-theme backdrop, declared in the field chunk and so
   // present in BOTH programs — these names must match the bU list in drawBg
@@ -3786,12 +3807,36 @@ function buildStates(){
   // coincident copies of state 2's plate and separate out of it into the last two
   // timeline rows; they are the only cells that gain a form across the morph, and
   // starting them ON an existing form is what keeps them from popping into being.
+  // The INKED bbox of each state's copy, padded by ~1.5 line heights. TRON's
+  // emission mask reads this so the traces route around whatever the copy
+  // actually is (see NOTE #6): the mask used to be two hard-coded ellipse radii
+  // that cleared only |pw.y|<0.341 while the copy filled nearly the full panel,
+  // so glowing traces crossed nine consecutive lines of the lede in a SETTLED
+  // state. Measured, it also self-corrects for any future copy length.
+  // Union of the INKED line boxes, not the block box. Rtext() over a whole section
+  // is no good here: a Range spanning block-level children reports their full
+  // container width (760px), so the mask covered the entire panel and erased the
+  // trace network wholesale. getClientRects() walks per LINE box, so centred copy
+  // measures the width of its longest line -- which is what leaves real margin for
+  // the traces to route through.
+  const txt = i => {
+    let L=1e9,T=1e9,Rt=-1e9,B=-1e9;
+    for(const el of secs[i].children){
+      const rng=document.createRange(); rng.selectNodeContents(el);
+      for(const r of rng.getClientRects()){
+        if(r.width<0.5||r.height<0.5) continue;
+        L=Math.min(L,r.left); T=Math.min(T,r.top); Rt=Math.max(Rt,r.right); B=Math.max(B,r.bottom);
+      }
+    }
+    if(L>Rt) return R(secs[i],0,0);                       // no inked content — fall back
+    return Rr({left:L,top:T,width:Rt-L,height:B-T}, mob?12:18, mob?18:26);
+  };
   STATES=[
-    {cells:oneForm(R(secs[0], mob?14:46, clear(mob?30:40))), k:0.16, corner:0.15},   // identity — lens
-    {cells:oneForm(R(secs[1], mob?16:40, clear(mob?30:34))), k:0.16, corner:0.15},   // method — card
-    {cells:fill([items[0],items[1],items[2],items[3],eyeb(2)]),             k:0.005, corner:0.06}, // work — 4 SEPARATE panels + label plate
-    {cells:fill([rows[0],rows[1],rows[2],rows[3],rows[4],rows[5],eyeb(3)]), k:0.006, corner:0.05}, // experience — SIX SEPARATE rows + label plate
-    {cells:oneForm(R(secs[4], mob?14:40, clear(mob?28:34))), k:0.16, corner:0.16},   // contact — card
+    {cells:oneForm(R(secs[0], mob?14:46, clear(mob?30:40))), k:0.16, corner:0.15, txt:txt(0)},   // identity — lens
+    {cells:oneForm(R(secs[1], mob?16:40, clear(mob?30:34))), k:0.16, corner:0.15, txt:txt(1)},   // method — card
+    {cells:fill([items[0],items[1],items[2],items[3],eyeb(2)]),             k:0.005, corner:0.06, txt:txt(2)}, // work — 4 SEPARATE panels + label plate
+    {cells:fill([rows[0],rows[1],rows[2],rows[3],rows[4],rows[5],eyeb(3)]), k:0.006, corner:0.05, txt:txt(3)}, // experience — SIX SEPARATE rows + label plate
+    {cells:oneForm(R(secs[4], mob?14:40, clear(mob?28:34))), k:0.16, corner:0.16, txt:txt(4)},   // contact — card
   ];
 }
 buildStates();
@@ -3815,7 +3860,8 @@ let reFrom=null, reAt=-1e9, pendingRebuild=false;
 function noteRebuild(){ reFrom=cur.cells.map(c=>c.slice()); reAt=performance.now(); }
 const cellBuf=new Float32Array(NCELL*4);   // exactly what uniform4fv(uCells,...) uploads
 function lerpState(a,b,t){
-  const out={cells:[],k:a.k+(b.k-a.k)*t,corner:a.corner+(b.corner-a.corner)*t};
+  const out={cells:[],k:a.k+(b.k-a.k)*t,corner:a.corner+(b.corner-a.corner)*t,
+             txt:a.txt.map((v,j)=>v+(b.txt[j]-v)*t)};
   for(let i=0;i<NCELL;i++){ const A=a.cells[i],B=b.cells[i]; out.cells.push([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t,A[3]+(B[3]-A[3])*t]); }
   return out;
 }
@@ -3849,7 +3895,10 @@ function scrollTarget(){
   for(let k=0;k<N;k++){
     let o=0;
     if(k===i)   o=1-Math.min(Math.max((frac-0.26)/0.14,0),1);
-    if(k===i+1) o=Math.min(Math.max((frac-0.50)/0.20,0),1);
+    // incoming ramp steepened 0.50..0.70 -> 0.54..0.66: the window where type sits
+    // at partial alpha (and so at partial contrast) is the ghost window, and the
+    // visitor controls how long they dwell in it. Halving it is free.
+    if(k===i+1) o=Math.min(Math.max((frac-0.54)/0.12,0),1);
     secs[k].style.opacity=o.toFixed(3);
     // NOTE #1: the copy MORPHS WITH the panel instead of just cross-fading. The
     // outgoing block recedes (shrinks + drifts up) as its panel is absorbed, and
@@ -3865,6 +3914,14 @@ function scrollTarget(){
       secs[k].style.transform='translate3d(0,'+(10*q).toFixed(2)+'px,0) scale('+(1-0.055*q).toFixed(4)+')'; }
     secs[k].classList.toggle('on', o>0.5);
   }
+  // The scrim LEADS the copy at both ends -- already at full strength before type
+  // appears, still up after it has gone -- so contrast never rides the fade curve
+  // (see the CSS note on .stage::before). It dips to 0 only across a narrow V at
+  // frac 0.46, which sits inside the 0.40..0.54 window where BY DESIGN no copy is
+  // on screen at all -- so the glass reads clean through contact and nothing else
+  // in the transition changes.
+  stage.style.setProperty('--so',
+    Math.min(1, Math.max((0.46-frac)/0.08, (frac-0.46)/0.08, 0)).toFixed(3));
   hint.style.opacity = p>0.02 ? '0':'0.8';
   r_state.textContent = String(i+ (mt>0.5?2:1)).padStart(2,'0')+' / '+String(N).padStart(2,'0');
   return lerpState(STATES[i],STATES[i+1],mt);
@@ -4102,7 +4159,7 @@ function loop(now){
   gl.uniform1f(uFrontPhg, TS.blobPh); gl.uniform2fv(uFrontCg, TS.frontC);
   gl.uniform4fv(uBgInkAg, TS.bgA); gl.uniform4fv(uBgInkBg, TS.bgB);
   gl.uniform1i(uBgPatAg, TS.bgPatA); gl.uniform1i(uBgPatBg, TS.bgPatB);
-  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform4fv(uTxtU,tgt.txt); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
   // ---- SCISSOR #gl to the glass bbox (v4.3 perf; the v3-handoff lever). ----
   // Everything this program draws — glass body + rim + contact shadow — lives
   // inside the union of the drawn cells and the blob; every pixel outside it
