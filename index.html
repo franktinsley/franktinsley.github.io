@@ -3864,7 +3864,13 @@ function loop(now){
   // spring the live params toward target (frost-like smoothing)
   const sp=reduced?1:0.16;
   cur.k+=(tgt.k-cur.k)*sp; cur.corner+=(tgt.corner-cur.corner)*sp; envN+=(progP-envN)*sp;
-  for(let i=0;i<NCELL;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]+=(tgt.cells[i][j]-cur.cells[i][j])*sp; } }
+  // CELL GEOMETRY tracks tighter than the material blend: the corner radius is
+  // 0.55*mn (cell size), and at 0.16 the cells lagged a fast fling then sprang to
+  // the final size AFTER the scroll stopped — a visible corner settle at the
+  // extremes. The morph target is already eased (mt), so this second smoothing was
+  // pure lag; 0.5 lets the shape follow the scroll and removes the post-stop snap.
+  const spCells=reduced?1:0.5;
+  for(let i=0;i<NCELL;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]+=(tgt.cells[i][j]-cur.cells[i][j])*spCells; } }
   // goo bump: add blend only mid-morph, so forms neck/flow while transitioning
   // but end up genuinely separate (k -> its small settle value) at rest.
   // Computed HERE (not at upload) because compCells must see the same k the
