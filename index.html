@@ -849,7 +849,10 @@ float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return 
 // every production-clamped request — there is no clamp-boundary regime.
 const float REFR_GAIN = 1.8;  // how much of the true refracted exit offset to apply
 const float SOAP_R2   = 0.70710678;
-const float SOAP_OCC  = 0.70;
+const float SOAP_TRL  = 0.21;   // TRON roll, x the soap roll — a crisp face, not a pillow
+const float SOAP_TPR  = 0.72;   // end taper: how fast the end caps slope inward
+const float SOAP_TPX  = 0.81155; // = normalize(1,SOAP_TPR).x, for the gradient
+const float SOAP_TPY  = 0.58432; // = normalize(1,SOAP_TPR).y
 const float TRN_NK    = 0.10;   // notch corner softness, x mn   // octagon: corner cut along the diagonal, x mn
 const float SOAP_OCW  = 0.34;   // and its OWN shoulder width, x the main roll's.
                                 // The main roll's w is 0.55R, which on a wide panel
@@ -917,7 +920,14 @@ void soapCell(int i, vec2 p, float px,
   // it left a max() that would silently become a SECOND rounding regime the moment
   // anyone raised uCorner or lowered SOAP_ROLL. The roll IS the corner in this
   // family (corner curvature == edge curvature identically); nothing else may round.
-  float R  = SOAP_ROLL*mn;
+  // THE ROLL IS THE SOAP-NESS. SOAP_ROLL=0.55 makes the roll 55% of the half-height,
+  // so the form is mostly shoulder with barely any flat face — a pillow. Every shape
+  // cut into it got swallowed, which is why a hexagon taper and a chamfer both still
+  // read as 'soap, slightly messed with'. A HUD panel is a FLAT FACE with a defined
+  // edge, so TRON pulls the roll in hard. Still one rounding mechanism and still
+  // continuously curved — just a tighter radius, which is a different form, not a
+  // pinched one.
+  float R  = SOAP_ROLL*mn*mix(1.0, SOAP_TRL, uOct);
   float w  = SOAP_SEAM*R;
   float S0 = R + 0.5*w;                       // shrink: edge silhouette lands on b
   float cap = 0.92*mn;
@@ -948,9 +958,20 @@ void soapCell(int i, vec2 p, float px,
   // extra shoulder eval per cell per Newton step.
   float sd = 0.0, dsd = 0.0;
   if (uOct > 0.001){
-    float bd = SOAP_R2*(b.x + b.y) - SOAP_OCC*mn*uOct;
-    float qd = dot(abs(rel), vec2(SOAP_R2)) - bd;
-    sd = soapShoulder(qd, w*SOAP_OCW, dsd);
+    // AN ELONGATED HEXAGON — the classic HUD panel form, and an actual DESIGNED
+    // shape rather than a soap blob with bites taken out of it. The plane is not
+    // 45: a symmetric diagonal on a box twice as wide as it is tall cuts from every
+    // direction at once and collapses the whole form into a pointed lens. This one
+    // is STEEP (slope SOAP_TPR), so it only bites the ENDS, and it is anchored to
+    // pass exactly through (b.x, 0) — the middle of the end cap — so the taper
+    // starts at the silhouette and opens upward and downward from there. Flat top
+    // and bottom are still held by sy; the ends slope in to meet them.
+    vec2  nr = normalize(vec2(1.0, SOAP_TPR));
+    float bd = nr.x*b.x;
+    float qd = dot(abs(rel), nr) - bd;
+    // Same shoulder width as the other two axes, so the sloped face rolls exactly
+    // like the flat ones and every vertex it makes stays continuously curved.
+    sd = soapShoulder(qd, w, dsd);
   }
   float r2 = sx*sx + sy*sy + sd*sd;
   c4 = r2*r2;
@@ -958,8 +979,8 @@ void soapCell(int i, vec2 p, float px,
   a4 = ar2*ar2;
   Rc = R;
   // grad picks up the diagonal too: d(qd)/dx = SOAP_R2*sign(x), same for y.
-  gxy = r2 * vec2((sx*dsx + sd*dsd*SOAP_R2)*sign(rel.x),
-                  (sy*dsy + sd*dsd*SOAP_R2)*sign(rel.y));
+  gxy = r2 * vec2((sx*dsx + sd*dsd*SOAP_TPX)*sign(rel.x),
+                  (sy*dsy + sd*dsd*SOAP_TPY)*sign(rel.y));
   float TH2 = TH*TH; th4 = TH2*TH2;
   mnO = mn;
 }
@@ -2617,40 +2638,6 @@ void main(){
     d += lagW * WTR_LINE * (0.5 - 0.5*wh);
   }
 
-  // TRON NOTCHES — the silhouette STEPS, the way a laid-out panel does.
-  // A 45 chamfer alone cannot get there on this aspect ratio: the panel is about
-  // twice as wide as it is tall, so the chamfer planes from opposite corners meet
-  // before the cut is deep enough to read, and it degenerates straight into a
-  // pointed eye. There is no setting between "invisible" and "broken". The angular
-  // character in the reference art is not chamfers, it is NOTCHES cut into the long
-  // edges — so cut them.
-  //
-  // Subtracted with a SMOOTH max, not a plain one: max() would leave a hard crease
-  // at every notch corner, and the standing verdict is that this glass curves
-  // continuously everywhere. smax rounds the reentrant corners at the same scale the
-  // roll rounds the convex ones, so a notch reads as milled rather than as clipped.
-  if (uOct > 0.001){
-    vec2 pn = p - par - ctrG;
-    float k = TRN_NK*mnG;
-    // Each notch box is CENTRED ON THE EDGE LINE (y = +/-mnG, the panel's short
-    // half-axis), so subtracting it takes a bite OUT of the edge. Centred inside
-    // instead — which is what a first pass did — it carves a hole in the middle of
-    // the glass, which reads as damage rather than as design. Depth is a fraction of
-    // the box's own half-height, so these break the edge line without eating the
-    // panel: the reference steps its outline, it does not chew it.
-    vec2 q1 = abs(pn - vec2(-0.62*mnG,  mnG)) - vec2(0.42*mnG, 0.13*mnG);
-    float n1 = length(max(q1,vec2(0.0))) + min(max(q1.x,q1.y),0.0);
-    // bottom edge, right of centre — shallower, and deliberately NOT mirrored
-    vec2 q2 = abs(pn - vec2( 0.78*mnG, -mnG)) - vec2(0.30*mnG, 0.10*mnG);
-    float n2 = length(max(q2,vec2(0.0))) + min(max(q2.x,q2.y),0.0);
-    // a short second step beside the first, so the top edge reads as a STAIR
-    vec2 q3 = abs(pn - vec2( 0.02*mnG,  mnG)) - vec2(0.16*mnG, 0.07*mnG);
-    float n3 = length(max(q3,vec2(0.0))) + min(max(q3.x,q3.y),0.0);
-    float cut = min(min(n1, n2), n3);
-    float h = clamp(0.5 - 0.5*(-cut - d)/k, 0.0, 1.0);
-    float sm = mix(-cut, d, h) + k*h*(1.0-h);          // smooth max(d, -cut)
-    d = mix(d, sm, uOct);
-  }
 
   // ---- THE FRONT, on the glass ----------------------------------------------
   // The SAME dissolveFront the backdrop uses, evaluated in the panel's own space
