@@ -886,8 +886,12 @@ void trailBulge(vec2 p, out float b, out vec2 gb){
     float q = dot(dp,dp)/(TRL_R*TRL_R);
     if (q > 8.0) continue;                      // gaussian is dead past ~3 sigma
     float e = exp(-q)*s*TRL_A;
-    b  += e;
-    gb += dp*(e*(-2.0/(TRL_R*TRL_R)));
+    // MAX, not sum. Summing overlapping gaussians compounds them — eight trail
+    // points at full strength added up to ~8x the intended inflation and ballooned
+    // the panel into an amorphous blob. A trail is the UNION of its bumps, so the
+    // envelope is what is wanted, and max() keeps the peak at exactly TRL_A however
+    // many points overlap. Gradient comes from whichever point is currently winning.
+    if (e > b){ b = e; gb = dp*(e*(-2.0/(TRL_R*TRL_R))); }
   }
 }
 uniform float uMnI[NCELL];     // INTENT mn per cell (min half-size before compensation).
@@ -4611,6 +4615,9 @@ const toField=(cx,cy)=>[(cx-GLR.left)*dpr, (GLR.height-(cy-GLR.top))*dpr];
 // makes the trail a fixed length in SPACE — it looks the same on every device, and
 // a slow drag leaves the same mark as a fast one instead of a dense clot.
 const NTRAIL=8, TRL_MS=520, TRL_GAP=0.055;
+// mirrors of the shader consts of the same name — kept in step by hand; they only
+// feed the scissor margin, which must cover everything the bulge can reach.
+const TRL_A=0.075, TRL_R=0.10;
 const trailBuf=new Float32Array(NTRAIL*3);
 const trail=[];                                   // newest first: {x,y,t}
 function trailPush(nx,ny){
@@ -4824,7 +4831,13 @@ function loop(now){
   if(TS.blobOn>0){ const b=TS.blob, br=b[2]*1.2+b[3];   // wobble is ≤16% of r; +its own k
     if(b[0]-br<bbx0)bbx0=b[0]-br; if(b[0]+br>bbx1)bbx1=b[0]+br;
     if(b[1]-br<bby0)bby0=b[1]-br; if(b[1]+br>bby1)bby1=b[1]+br; }
-  const smar=repGrowth(kLive,nLive)+0.06+0.05+Math.abs(parx)+Math.abs(pary);
+  // + the trail bulge. The scissor box is derived from the CELLS, but the trail
+  // inflates the solid past them — so without this term the bulge is drawn right up
+  // to the scissor edge and then stops dead, which is the straight vertical cut the
+  // owner saw outside the panel. TRL_A is the peak inflation (max(), so it cannot
+  // exceed that however many points overlap) and TRL_R is how far the falloff still
+  // reaches; anything beyond is below the exp cutoff and cannot mark a pixel.
+  const smar=repGrowth(kLive,nLive)+0.06+0.05+Math.abs(parx)+Math.abs(pary)+TRL_A+TRL_R;
   // p=(2·fragCoord−uRes)/uRes.y and the glass sits at cells+par (soapDist
   // samples p−par), so fragCoord = ((p+par)·H+extent)/2; y is bottom-up in both
   // gl_FragCoord and scissor space, so no flip.
