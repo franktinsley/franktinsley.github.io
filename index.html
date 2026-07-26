@@ -624,6 +624,11 @@ vec3 field(vec2 sp, vec2 m, float scr){
   <div class="cell"><span class="k">RES</span> <span class="v" id="r_res">—</span></div>
   <div class="cell"><span class="k">FPS</span> <span class="v acc" id="r_fps">—</span></div>
   <div class="cell"><span class="k">STATE</span> <span class="v" id="r_state">01 / 05</span></div>
+  <!-- diagnostic: scroll position + exactly the quantities that would explain a
+       geometry pop, so a screenshot at the moment of a jump is self-describing.
+       Deliberately NOT .opt — the narrow-screen rules hide those, and a phone is
+       where this is being chased. -->
+  <div class="cell"><span class="k">POS</span> <span class="v" id="r_pos">—</span></div>
   <div class="cell"><span class="k">VIEW</span> <span class="v acc" id="r_dbg">render</span> <span class="k">(n)</span></div>
   <span class="spacer"></span>
   <div class="cell opt"><span class="k">SDF</span> <span class="v" id="r_cells">6-cell · smin</span></div>
@@ -3837,7 +3842,8 @@ function compCells(cells, k, n, out){
 const oneForm=c=>new Array(NCELL).fill(c);
 let STATES=[];
 let builtH=0, builtW=0;   // viewport H/W at the last buildStates() geometry measure (?diag)
-function buildStates(){
+let bsCount=0;
+function buildStates(){ bsCount++;
   builtH=document.documentElement.clientHeight; builtW=document.documentElement.clientWidth;
   // pad kept tight (esp. the separation axis) so cssGap − 2·pad clears k — see
   // the .grid/.rows gaps in CSS. Then the settled k below is tiny → real gaps.
@@ -4050,6 +4056,8 @@ function scrollTarget(){
 
 let W=0,H=0,dpr=1;
 const r_res=document.getElementById('r_res'),r_fps=document.getElementById('r_fps'),r_cur=document.getElementById('r_cur');
+const r_pos=document.getElementById('r_pos');
+let posPrev='';
 // vpH() is the LAYOUT viewport: the one height iOS keeps STABLE while the toolbar
 // animates (innerHeight is the visual viewport and moves; 100vh is the large
 // viewport and is a third value). It sizes the FOREGROUND box #vp and the scroll
@@ -4230,6 +4238,12 @@ function loop(now){
   // still-separating pair mid-spring, and read ONCE here so the CPU compensation,
   // the scissor margin and the shader all fold the identical chain this frame.
   const nLive = liveN(cur.cells);
+  // y · segment.frac · live cell count · blend width · rebuild count.
+  // If a jump lines up with the cell count or the rebuild count changing, the
+  // screenshot says so outright instead of needing another round of bisection.
+  const posNow = Math.round(scrollY)+' \u00b7 '+(segI+segF).toFixed(3)+' \u00b7 '
+               + nLive+'c \u00b7 k'+kLive.toFixed(3)+' \u00b7 b'+bsCount;
+  if(posNow!==posPrev){ posPrev=posNow; r_pos.textContent=posNow; }
   // cur.cells are INTENT boxes; the buffer gets the fold-chain-compensated
   // cells so the drawn silhouette lands on the intent (see compCells).
   compCells(cur.cells, kLive, nLive, cellBuf);
