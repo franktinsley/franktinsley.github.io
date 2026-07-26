@@ -4057,7 +4057,24 @@ function themeFrame(parx, pary){
   // it. No gate is doing the hiding — the geometry is.
   const absorb=sstep(0.0,0.85,spreadT);
   const r=R0*(0.85+0.25*riseT)*(1-0.72*absorb);   // and shrink harder on the way in
-  const startY=-1.55;
+  // WHERE THE BLOB COMES FROM. It always exists — the theme takeover is
+  // scroll-deterministic and must never depend on the visitor having touched, or a
+  // mouse user who only scrolls would never see a state change. So a touch does not
+  // CREATE the blob, it only relocates its ORIGIN:
+  //   * no touch  -> off the edge it is travelling from: below when scrolling down,
+  //                  above when scrolling up, so it always enters against the motion
+  //                  and reads as being carried in by the scroll.
+  //   * recent touch -> straight out of the point that was touched.
+  // LATCHED at the moment the rise begins. Re-reading the touch mid-flight would
+  // teleport a blob that is already moving; the origin is a starting condition, not
+  // a live input.
+  if(riseT<=0.001){
+    const fresh = touches.length && (performance.now()-touches[0].t) < 1400;
+    blobOrigin[0] = fresh ? touches[0].x : TS.contact[0];
+    blobOrigin[1] = fresh ? (touches[0].y0 + scrollUnits())
+                          : (scrollDown ? -1.55 : 1.55);
+  }
+  const startX=blobOrigin[0], startY=blobOrigin[1];
   // NOTE #3: the blob cluster FLOATS on its own clock and merely FLOWS UPWARD with
   // the scroll, instead of being a pure function of scroll position. tNow is real
   // time, so the drift keeps moving when you stop and never replays identically;
@@ -4065,7 +4082,10 @@ function themeFrame(parx, pary){
   const tNow=performance.now()*0.001;
   const driftX=0.055*Math.sin(tNow*0.37+segI*2.1)+0.028*Math.sin(tNow*0.83+1.7);
   const driftY=0.030*Math.sin(tNow*0.29+0.9)+0.016*Math.sin(tNow*0.61+2.4);
-  TS.blob[0]=TS.contact[0]+0.10*Math.sin(6.0*u+segI*2.1)*(1-0.6*riseT)+driftX*(1-0.5*riseT);
+  // x now travels from the origin to the contact point too, so a touch off to one
+  // side sends the blob in on a diagonal rather than teleporting it to centre.
+  TS.blob[0]=startX+(TS.contact[0]-startX)*easeO(riseT)
+            +0.10*Math.sin(6.0*u+segI*2.1)*(1-0.6*riseT)+driftX*(1-0.5*riseT);
   const yRest=TS.contact[1]-r*0.35;          // floating just under the panel
   // yDeep is measured off the PANEL'S OWN BOTTOM EDGE, not off contact. contact sits
   // BELOW the panel edge, so "above contact" never meant "inside the panel" — the blob
@@ -4624,6 +4644,9 @@ const toField=(cx,cy)=>[(cx-GLR.left)*dpr, (GLR.height-(cy-GLR.top))*dpr];
 // the page can feel unresponsive to the drag itself. These are the one thing that
 // tracks the content, so a scroll always has a visible consequence.
 const NTOUCH=4, TCH_MS=4200, TCH_R=0.085, TCH_GAP=0.30;
+const blobOrigin=[0,-1.55];   // latched at rise start — see the note in the timeline
+let scrollDown=true, _lastSY=0;
+addEventListener('scroll',()=>{ const y=scrollY; if(y!==_lastSY){ scrollDown = y>_lastSY; _lastSY=y; } },{passive:true});
 const touchBuf=new Float32Array(NTOUCH*4);
 const touches=[];                                  // newest first: {x,y0,t}
 // Scroll in the shader's own units: p is (2*frag-res)/res.y, so one unit is H/2
