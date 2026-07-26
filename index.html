@@ -3361,6 +3361,7 @@ const TS={ A:0,B:0,u:0,prog:0, riseT:0,spreadT:0, blob:[0,-2,0,0.09], blobOn:0, 
            matA:null,matB:null,matBlob:null,
            bgA:[0,0,0,0],bgB:[0,0,0,0], bgPatA:0,bgPatB:0 };
 let segI=0, segF=0, progP=0;   // written by scrollTarget() each frame
+let envN=0;   // eased scroll for env rotation — raw progP steps on wheel/momentum and jitters the reflections
 const clamp01=v=>Math.min(Math.max(v,0),1);
 const sstep=(a,b,v)=>{ const t=clamp01((v-a)/(b-a)); return t*t*(3-2*t); };
 let curThemeClass='';
@@ -3788,16 +3789,7 @@ function resize(){ dpr=Math.min(window.devicePixelRatio||1,2);
   GLR=canvas.getBoundingClientRect();
   W=Math.round(GLR.width*dpr); H=Math.round(GLR.height*dpr);
   canvas.width=W; canvas.height=H; gl.viewport(0,0,W,H); r_res.textContent=`${(W*H/1e6).toFixed(1)} Mpx`;
-  // CORNER-JUMP FIX: re-measuring the DOM changes cell sizes, and the corner radius
-  // is 0.55*mn — so a rebuild visibly snaps every corner. Mobile toolbars collapse
-  // at the scroll extremes, firing height-only resizes; rebuilding on those made the
-  // corners jump/jitter after scrolling to the top or bottom. Rebuild only on a WIDTH
-  // change or a height change bigger than any toolbar (>120px = rotation/real resize);
-  // the tiny transient text drift under a collapsing toolbar is invisible next to the
-  // corner snap it replaces. Font-load and theme-swap rebuilds are unaffected (they
-  // call buildStates() directly).
-  const cw=document.documentElement.clientWidth, ch=document.documentElement.clientHeight;
-  if (cw!==builtW || Math.abs(ch-builtH)>120) buildStates(); }
+buildStates(); }
 addEventListener('resize',resize); resize();
 document.fonts && document.fonts.ready.then(buildStates);   // re-measure once text metrics settle
 // theme webfonts (Rajdhani/Exo 2/Playfair/Cormorant/Alegreya) can finish loading
@@ -3871,7 +3863,7 @@ function loop(now){
   const tgt=scrollTarget();
   // spring the live params toward target (frost-like smoothing)
   const sp=reduced?1:0.16;
-  cur.k+=(tgt.k-cur.k)*sp; cur.corner+=(tgt.corner-cur.corner)*sp;
+  cur.k+=(tgt.k-cur.k)*sp; cur.corner+=(tgt.corner-cur.corner)*sp; envN+=(progP-envN)*sp;
   for(let i=0;i<NCELL;i++){ for(let j=0;j<4;j++){ cur.cells[i][j]+=(tgt.cells[i][j]-cur.cells[i][j])*sp; } }
   // goo bump: add blend only mid-morph, so forms neck/flow while transitioning
   // but end up genuinely separate (k -> its small settle value) at rest.
@@ -3951,7 +3943,7 @@ function loop(now){
   gl.uniform1f(uFrontPhg, TS.blobPh); gl.uniform2fv(uFrontCg, TS.frontC);
   gl.uniform4fv(uBgInkAg, TS.bgA); gl.uniform4fv(uBgInkBg, TS.bgB);
   gl.uniform1i(uBgPatAg, TS.bgPatA); gl.uniform1i(uBgPatBg, TS.bgPatB);
-  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,progP);
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envN);
   // ---- SCISSOR #gl to the glass bbox (v4.3 perf; the v3-handoff lever). ----
   // Everything this program draws — glass body + rim + contact shadow — lives
   // inside the union of the drawn cells and the blob; every pixel outside it
