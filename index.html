@@ -4150,7 +4150,17 @@ function loop(now){
   // but end up genuinely separate (k -> its small settle value) at rest.
   // Computed HERE (not at upload) because compCells must see the same k the
   // shader folds with — the bump's extra chain growth is part of what it undoes.
-  const kLive = cur.k + 0.085*morphAmt;
+  // BLEND WIDTH mid-morph. 0.085 was too narrow for the distances these cells
+  // travel: once a cell's separation outgrows the blend, sqPhi's compact support
+  // stops bridging and the union develops a reentrant SHOULDER — a smooth roll
+  // interrupted by a kink. That is what read as the panel 'jumping from one
+  // corner radius to another' (it is not a radius change at all; R = 0.55*mn is
+  // continuous — verified), and the same artifact is the mid23 keyhole notches.
+  // 0.25 keeps the fold bridging across the whole split, so the silhouette stays
+  // continuously curved the entire way through. Chosen from a rendered ladder
+  // (0.085 / 0.25 / 0.45) at all three transitions: 0.45 over-inflates.
+  // Settled states are untouched — morphAmt is 0 there, so kLive == cur.k.
+  const kLive = cur.k + 0.250*morphAmt;
   // nLive: how many cells are actually distinct after this frame's spring step.
   // Derived from cur.cells (not from the target) so it can never under-count a
   // still-separating pair mid-spring, and read ONCE here so the CPU compensation,
