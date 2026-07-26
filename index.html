@@ -1777,6 +1777,8 @@ const float TRF_MX=0.030, TRF_MY=0.015;   // ring offset out from the measured c
 const float TRF_CH=0.075;                 // max 45 chamfer
 const float TRF_S=0.034;                  // stub length
 const float TRF_G=0.011;                  // guard-trace inset from the ring
+const float TRF_BAND=0.085;               // early-out: how far the net reaches off the frame
+const float TRF_BEV=0.018, TRF_BEVA=0.62;  // bevel half-width (~7px) + its slope amplitude
 
 // TRUE ARC LENGTH, and why it had to be built before a turn could be reversed.
 //
@@ -1889,6 +1891,40 @@ void tPad(vec2 p, vec2 c, float r, float w, float s0,
   float d=length(max(q,0.0))+min(max(q.x,q.y),0.0);
   float u=max(d,0.0)/w;
   if(u<bu){ bu=u; bcp=c+clamp(p-c,-r,r); bw=w; bs=s0; } }
+
+// A RING, not a filled land. The reference art uses open circles as nodes on the
+// contour — a filled dot reads as a terminator, a ring reads as a through-hole
+// something passes into. Cheap: distance to a circle is |length - r|.
+void tRing(vec2 p, vec2 c, float r, float w, float s0,
+           inout float bu, inout vec2 bcp, inout float bw, inout float bs){
+  vec2 dd=p-c; float L=length(dd);
+  float u=abs(L-r)/w;
+  if(u<bu){ bu=u; bcp=c+dd*(r/max(L,1e-6)); bw=w; bs=s0; } }
+
+// A STEPPED corner: two 45s with a short JOG between them, stepping outward along
+// the corner bisector. One plain chamfer reads as a bevel — a machine rounding a
+// box. A chamfer with a step in it reads as something a person laid out, and it is
+// the single strongest "designed panel" cue in the reference. a sits on the
+// incoming run, b on the outgoing one; the jog is inserted partway between.
+void tStep2(vec2 p, vec2 a, vec2 b, vec2 jog, float w, inout float sA,
+            inout float bu, inout vec2 bcp, inout float bw, inout float bs){
+  vec2 m1=mix(a,b,0.40), m2=m1+jog;
+  tAdd(p, a,  m1, w, normalize(m1-a),  sA, bu,bcp,bw,bs);
+  tAdd(p, m1, m2, w, normalize(jog),   sA, bu,bcp,bw,bs);
+  tAdd(p, m2, b,  w, normalize(b-m2),  sA, bu,bcp,bw,bs); }
+
+// HATCH — the /////// blocks that run along the reference's bottom rail. A set of
+// short parallel 45s; pure decoration, and decoration placed on purpose is most of
+// what separates a designed panel from a drawn rectangle.
+void tHatch(vec2 p, vec2 c, int n, float len, float gap, float w, float s0,
+            inout float bu, inout vec2 bcp, inout float bw, inout float bs){
+  float sJ=s0;
+  for(int i=0;i<6;i++){
+    if(i>=n) break;
+    vec2 o=c+vec2((float(i)-float(n-1)*0.5)*gap, 0.0);
+    tAdd(p, o+vec2(-len*0.5, len*0.5), o+vec2(len*0.5,-len*0.5),
+         w, vec2(TRN_R2,-TRN_R2), sJ, bu,bcp,bw,bs);
+  } }
 
 // ---- 45-DEGREE TURNS ----------------------------------------------------
 // A 90-degree elbow is the one thing a board designer never draws.  The inside
@@ -2057,49 +2093,78 @@ Pat patTron(vec3 seam, float gain, Geo G, vec3 a0, float r0, float m0){
   // continuously the whole way round instead of restarting on every side.
   // Corners turn in two 45s, never a 90 — the inside of a square corner is an
   // acid trap in etch and an impedance step in copper, so real routing chamfers.
-  sA=0.0;
-  tAdd(p, TL+vec2(ch,0.0), TR-vec2(ch,0.0), TRF_W, vec2(1.0,0.0),  sA, bu,bcp,bw,bs);
-  tAdd(p, TR-vec2(ch,0.0), TR-vec2(0.0,ch), TRF_W, vec2( TRN_R2,-TRN_R2), sA, bu,bcp,bw,bs);
-  tAdd(p, TR-vec2(0.0,ch), BR+vec2(0.0,ch), TRF_W, vec2(0.0,-1.0), sA, bu,bcp,bw,bs);
-  tAdd(p, BR+vec2(0.0,ch), BR-vec2(ch,0.0), TRF_W, vec2(-TRN_R2,-TRN_R2), sA, bu,bcp,bw,bs);
-  tAdd(p, BR-vec2(ch,0.0), BL+vec2(ch,0.0), TRF_W, vec2(-1.0,0.0), sA, bu,bcp,bw,bs);
-  tAdd(p, BL+vec2(ch,0.0), BL+vec2(0.0,ch), TRF_W, vec2(-TRN_R2, TRN_R2), sA, bu,bcp,bw,bs);
-  tAdd(p, BL+vec2(0.0,ch), TL-vec2(0.0,ch), TRF_W, vec2(0.0,1.0),  sA, bu,bcp,bw,bs);
-  tAdd(p, TL-vec2(0.0,ch), TL+vec2(ch,0.0), TRF_W, vec2( TRN_R2, TRN_R2), sA, bu,bcp,bw,bs);
-  float uS=bu;                       // RING tier — plays the old spine's role in the glow ramp
+  // EARLY OUT. The whole net lives in a thin BAND around the frame rectangle, and
+  // most pixels on the panel are nowhere near it — deep in the copy area, or out
+  // past the rim. Testing ~45 primitives for those is pure waste, so bound the
+  // band once with a single box distance and skip the lot. Safe under divergent
+  // flow: nothing in here takes a derivative (G.px is precomputed, and the tail
+  // reads rimT, not fwidth). Skipped pixels keep bu = 1e9, which the tail already
+  // reads as "no trace".
+  float uS=1.0e9, uB2=1.0e9;
+  vec2  qF = abs(p - C) - H;
+  float dF = length(max(qF,vec2(0.0))) + min(max(qF.x,qF.y),0.0);
+  if (abs(dF) < TRF_BAND){
+    sA=0.0;
+    // The contour is walked ONCE, clockwise, so the packet's arc length runs
+    // continuously the whole way round instead of restarting on every side.
+    // CH_X/CH_Y are what a stepped corner consumes off each run.
+    float CX=ch, CY=ch*1.10;
+    vec2 biTR=vec2( TRN_R2, TRN_R2), biBR=vec2( TRN_R2,-TRN_R2);
+    vec2 biBL=vec2(-TRN_R2,-TRN_R2), biTL=vec2(-TRN_R2, TRN_R2);
+    float jg=ch*0.20;
 
-  // Vias on the ring at each chamfer, where a real board changes layer.
-  tPad(p, TR+vec2(-ch*0.5,-ch*0.5), TRF_W*1.5, TRF_W, sA*0.15, bu,bcp,bw,bs);
-  tPad(p, BR+vec2(-ch*0.5, ch*0.5), TRF_W*1.5, TRF_W, sA*0.40, bu,bcp,bw,bs);
-  tPad(p, BL+vec2( ch*0.5, ch*0.5), TRF_W*1.5, TRF_W, sA*0.65, bu,bcp,bw,bs);
-  tPad(p, TL+vec2( ch*0.5,-ch*0.5), TRF_W*1.5, TRF_W, sA*0.90, bu,bcp,bw,bs);
+    tAdd(p, TL+vec2(CX,0.0), TR-vec2(CX,0.0), TRF_W, vec2(1.0,0.0),  sA, bu,bcp,bw,bs);
+    tStep2(p, TR-vec2(CX,0.0), TR-vec2(0.0,CY), biTR*jg, TRF_W, sA, bu,bcp,bw,bs);
+    tAdd(p, TR-vec2(0.0,CY), BR+vec2(0.0,CY), TRF_W, vec2(0.0,-1.0), sA, bu,bcp,bw,bs);
+    tStep2(p, BR+vec2(0.0,CY), BR-vec2(CX,0.0), biBR*jg, TRF_W, sA, bu,bcp,bw,bs);
+    tAdd(p, BR-vec2(CX,0.0), BL+vec2(CX,0.0), TRF_W, vec2(-1.0,0.0), sA, bu,bcp,bw,bs);
+    tStep2(p, BL+vec2(CX,0.0), BL+vec2(0.0,CY), biBL*jg, TRF_W, sA, bu,bcp,bw,bs);
+    tAdd(p, BL+vec2(0.0,CY), TL-vec2(0.0,CY), TRF_W, vec2(0.0,1.0),  sA, bu,bcp,bw,bs);
+    tStep2(p, TL-vec2(0.0,CY), TL+vec2(CX,0.0), biTL*jg, TRF_W, sA, bu,bcp,bw,bs);
+    uS=bu;                       // CONTOUR tier — the primary line
 
-  // Fan-out: short stubs leaving the ring OUTWARD into the panel margin, each
-  // terminating in a square land — never inward, so nothing can reach the type.
-  // Thin gauge, so the frame stays the primary line and these read the way a
-  // board reads at its edge connector.
-  // Fan out SIDEWAYS, not up and down. A text column leaves generous margin left
-  // and right of it and almost none above or below, so that is where a real
-  // layout would run its breakout — and it keeps every stub on the flat interior
-  // instead of climbing the roll.
-  float sB=sA;
-  vec2 fL0=C+vec2(-H.x, H.y*0.42), fL1=C+vec2(-H.x,-H.y*0.30);   // NOT r0/r1 — patTron
-  vec2 fR0=C+vec2( H.x, H.y*0.16), fR1=C+vec2( H.x,-H.y*0.55);   // already takes r0 (roughness)
-  tAdd(p, fL0, fL0-vec2(TRF_S,0.0),      TRF_T, vec2(-1.0,0.0), sB, bu,bcp,bw,bs);
-  tPad(p, fL0-vec2(TRF_S,0.0),      TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
-  tAdd(p, fL1, fL1-vec2(TRF_S*0.58,0.0), TRF_T, vec2(-1.0,0.0), sB, bu,bcp,bw,bs);
-  tPad(p, fL1-vec2(TRF_S*0.58,0.0), TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
-  tAdd(p, fR0, fR0+vec2(TRF_S*0.72,0.0), TRF_T, vec2( 1.0,0.0), sB, bu,bcp,bw,bs);
-  tPad(p, fR0+vec2(TRF_S*0.72,0.0), TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
-  tAdd(p, fR1, fR1+vec2(TRF_S,0.0),      TRF_T, vec2( 1.0,0.0), sB, bu,bcp,bw,bs);
-  tPad(p, fR1+vec2(TRF_S,0.0),      TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
+    // RING nodes on the corner steps, where the contour changes direction. Open
+    // circles, not filled lands: a ring reads as a through-hole something passes
+    // into, a dot reads as a dead end.
+    tRing(p, TR+biTR*(jg*0.55)-vec2(CX,CY)*0.45, TRF_W*2.6, TRF_T, sA*0.12, bu,bcp,bw,bs);
+    tRing(p, BR+biBR*(jg*0.55)+vec2(-CX,CY)*0.45, TRF_W*2.6, TRF_T, sA*0.37, bu,bcp,bw,bs);
+    tRing(p, BL+biBL*(jg*0.55)+vec2(CX,CY)*0.45, TRF_W*2.6, TRF_T, sA*0.62, bu,bcp,bw,bs);
+    tRing(p, TL+biTL*(jg*0.55)+vec2(CX,-CY)*0.45, TRF_W*2.6, TRF_T, sA*0.87, bu,bcp,bw,bs);
 
-  // A guard trace running parallel OUTSIDE each vertical run — a ground guard
-  // beside a signal is real board vocabulary, and it stops the frame reading as
-  // one drawn rectangle. Outside, because inside is where the copy is.
-  tAdd(p, TL+vec2(-TRF_G, -ch*1.3), BL+vec2(-TRF_G, ch*1.3), TRF_T, vec2(0.0,-1.0), sB, bu,bcp,bw,bs);
-  tAdd(p, TR+vec2( TRF_G, -ch*1.3), BR+vec2( TRF_G, ch*1.3), TRF_T, vec2(0.0,-1.0), sB, bu,bcp,bw,bs);
-  float uB=bu;                       // BRANCH tier
+    float sB=sA;
+    // Fan out SIDEWAYS. A text column leaves generous margin left and right and
+    // almost none above or below, so that is where a real layout runs its breakout —
+    // and it keeps every stub on the flat interior instead of climbing the roll.
+    vec2 fL0=C+vec2(-H.x, H.y*0.42), fL1=C+vec2(-H.x,-H.y*0.30);
+    vec2 fR0=C+vec2( H.x, H.y*0.16), fR1=C+vec2( H.x,-H.y*0.55);
+    tAdd(p, fL0, fL0-vec2(TRF_S,0.0),      TRF_T, vec2(-1.0,0.0), sB, bu,bcp,bw,bs);
+    tPad(p, fL0-vec2(TRF_S,0.0),      TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
+    tAdd(p, fL1, fL1-vec2(TRF_S*0.58,0.0), TRF_T, vec2(-1.0,0.0), sB, bu,bcp,bw,bs);
+    tRing(p, fL1-vec2(TRF_S*0.58,0.0), TRF_T*2.2, TRF_T, sB, bu,bcp,bw,bs);
+    tAdd(p, fR0, fR0+vec2(TRF_S*0.72,0.0), TRF_T, vec2( 1.0,0.0), sB, bu,bcp,bw,bs);
+    tRing(p, fR0+vec2(TRF_S*0.72,0.0), TRF_T*2.2, TRF_T, sB, bu,bcp,bw,bs);
+    tAdd(p, fR1, fR1+vec2(TRF_S,0.0),      TRF_T, vec2( 1.0,0.0), sB, bu,bcp,bw,bs);
+    tPad(p, fR1+vec2(TRF_S,0.0),      TRF_T*2.4, TRF_T, sB, bu,bcp,bw,bs);
+
+    // HATCH rails on the bottom run — the /////// blocks from the reference. Placed
+    // in pairs off centre so the bottom edge is not symmetric with the top.
+    tHatch(p, C+vec2(-H.x*0.46,-H.y), 5, ch*0.34, ch*0.17, TRF_T, sB, bu,bcp,bw,bs);
+    tHatch(p, C+vec2( H.x*0.46,-H.y), 5, ch*0.34, ch*0.17, TRF_T, sB, bu,bcp,bw,bs);
+
+    // TICK column on each vertical run — the stacked dots in the reference art.
+    for(int i=0;i<3;i++){
+      float t=(float(i)-1.0)*ch*0.30;
+      tRing(p, C+vec2(-H.x-TRF_G, H.y*0.05+t), TRF_T*1.5, TRF_T, sB, bu,bcp,bw,bs);
+      tRing(p, C+vec2( H.x+TRF_G,-H.y*0.28+t), TRF_T*1.5, TRF_T, sB, bu,bcp,bw,bs);
+    }
+
+    // Guard trace outside each vertical run — a ground guard beside a signal is real
+    // board vocabulary, and it stops the frame reading as one drawn rectangle.
+    tAdd(p, TL+vec2(-TRF_G,-CY*1.3), BL+vec2(-TRF_G, CY*1.3), TRF_T, vec2(0.0,-1.0), sB, bu,bcp,bw,bs);
+    tAdd(p, TR+vec2( TRF_G,-CY*1.3), BR+vec2( TRF_G, CY*1.3), TRF_T, vec2(0.0,-1.0), sB, bu,bcp,bw,bs);
+
+  }
+  uB2=bu; float uB=uB2;              // BRANCH tier
 
   // ROOM TO ROUTE. The frame lives in the keepout between the copy box and the
   // flat interior, and the roll eats 0.55*mn off every edge, so that gap can be
@@ -2127,6 +2192,17 @@ Pat patTron(vec3 seam, float gain, Geo G, vec3 a0, float r0, float m0){
   vec2 fb=p-bcp; vec2 bg=fb*inversesqrt(max(dot(fb,fb),1e-12));
   float depth=TRN_WALL*bw*(1.0-TRN_FL)/1.875;
   o.bump=(depth*dS/bw)*bg*trim;
+  // 3D, not vector art. bw cancels out of the line above, so the groove wall is a
+  // fixed HEIGHT however wide the trace is — which means a 3px contour gets about
+  // one pixel of wall on each side and there is simply nowhere for the key light to
+  // land. So the thin bright core now sits in a WIDER, shallower BEVEL: a broad
+  // shoulder milled around it, big enough to shade. Thin line in a wide channel is
+  // also what the reference art is really drawing when it puts a soft glow either
+  // side of a hard line.
+  float dW  = bu*bw;                                   // world distance to the net
+  float tB  = clamp(dW/TRF_BEV, 0.0, 1.0);
+  float dSB = 30.0*tB*tB*(1.0-tB)*(1.0-tB);
+  o.bump += (TRF_BEVA*dSB)*bg*trim;
   o.nvar=clamp(0.5*TRN_WALL*G.px/max(bw*(1.0-TRN_FL),1e-6), 0.0, 1.0);
   o.alb  = a0*mix(1.0,0.22,P);
   o.rough= clamp(r0+0.26*P+0.40*S*(1.0-S), 0.0, 1.0);
