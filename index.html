@@ -741,6 +741,10 @@ precision highp float;
 uniform vec2  uRes;
 uniform float uTime;
 uniform vec4  uCells[NCELL];   // xy = center, zw = half-size (y-normalized units)
+uniform float uOct;            // 0 = rounded box, 1 = rounded OCTAGON. The TRON skin
+                               // asks the GEOMETRY to be the panel, not a soap blob
+                               // wearing a frame; ramped on the theme spread so the
+                               // form morphs between the two rather than switching.
 uniform float uFoldG;          // repGrowth(uK, uN): the fold chain's coincident growth.
                                // The corner subtracts it because the fold adds it back.
 uniform float uMnI[NCELL];     // INTENT mn per cell (min half-size before compensation).
@@ -844,6 +848,14 @@ float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return 
 // The roll IS the corner in this family, and SOAP_ROLL > 0.5 means R dominates
 // every production-clamped request — there is no clamp-boundary regime.
 const float REFR_GAIN = 1.8;  // how much of the true refracted exit offset to apply
+const float SOAP_R2   = 0.70710678;
+const float SOAP_OCC  = 0.62;   // octagon: corner cut along the diagonal, x mn
+const float SOAP_OCW  = 0.34;   // and its OWN shoulder width, x the main roll's.
+                                // The main roll's w is 0.55R, which on a wide panel
+                                // is as large as the whole SHORT axis — inherit that
+                                // and the chamfer smears across the entire side into
+                                // a lens. The chamfer is a designed FACET; it wants a
+                                // crisper blend than the edge roll it interrupts.
 const float SOAP_ROLL = 0.55;   // roll radius R = SOAP_ROLL*mn (the softness knob)
 const float SOAP_SEAM = 1.00;   // seam-band width w = SOAP_SEAM*R (measured best)
 const float SOAP_THK  = 0.62;   // TH = SOAP_THK*mn — production glass thickness
@@ -916,12 +928,37 @@ void soapCell(int i, vec2 p, float px,
   float dsx, dsy;
   float sx = soapShoulder(q.x, w, dsx);
   float sy = soapShoulder(q.y, w, dsy);
-  float r2 = sx*sx + sy*sy;
+  // THE DIAGONAL SHOULDER — a third axis, which turns the rounded box into a rounded
+  // OCTAGON. This is how the TRON panel gets its chamfered HUD silhouette without
+  // breaking the standing verdict that the glass must curve continuously everywhere:
+  // the chamfer runs through the SAME soapShoulder as the other two axes, so every
+  // vertex it creates is rolled exactly like an edge and nothing pinches. Cutting the
+  // corner with a max() half-plane instead would have put a hard crease on the
+  // silhouette, which is the one thing this family is built not to do.
+  // At uOct=0 the diagonal extent is 4x the rect's own, so qd is far negative,
+  // soapShoulder returns 0, and this term costs a shoulder eval and nothing else.
+  // Referenced against the DRAWN edge (b), not the core box (bs). sx and sy keep
+  // growing all the way out through the roll, so a diagonal measured off bs is
+  // already large by the time it reaches the silhouette — which cut deep into the
+  // flat sides and turned a wide panel into a lens. Off b, the cut is a corner
+  // triangle of SOAP_OCC*mn, which is what a chamfer actually is.
+  // Guarded on uOct, which is a UNIFORM — so the branch is coherent across the whole
+  // draw and the four non-TRON states pay nothing at all for this, rather than an
+  // extra shoulder eval per cell per Newton step.
+  float sd = 0.0, dsd = 0.0;
+  if (uOct > 0.001){
+    float bd = SOAP_R2*(b.x + b.y) - SOAP_OCC*mn*uOct;
+    float qd = dot(abs(rel), vec2(SOAP_R2)) - bd;
+    sd = soapShoulder(qd, w*SOAP_OCW, dsd);
+  }
+  float r2 = sx*sx + sy*sy + sd*sd;
   c4 = r2*r2;
   float ar = R/TH, ar2 = ar*ar;
   a4 = ar2*ar2;
   Rc = R;
-  gxy = r2 * vec2(sx*dsx*sign(rel.x), sy*dsy*sign(rel.y));
+  // grad picks up the diagonal too: d(qd)/dx = SOAP_R2*sign(x), same for y.
+  gxy = r2 * vec2((sx*dsx + sd*dsd*SOAP_R2)*sign(rel.x),
+                  (sy*dsy + sd*dsd*SOAP_R2)*sign(rel.y));
   float TH2 = TH*TH; th4 = TH2*TH2;
   mnO = mn;
 }
@@ -3499,7 +3536,7 @@ const U=n=>gl.getUniformLocation(prog,n);
 // uLight is RETIRED (v4.5: the key light is the shader const KEY_L — one sun,
 // not a knob). The lookup stays (null) so tests/glass-zoom.js's unguarded
 // uniform3f(uLight,...) remains a legal no-op instead of a ReferenceError.
-const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uFoldGU=U('uFoldG'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
+const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uOctU=U('uOct'),uFoldGU=U('uFoldG'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
   uMatA=U('uMatA[0]'),uMatB=U('uMatB[0]'),uMatBlob=U('uMatBlob[0]'),uBlobU=U('uBlob'),uBlobOn=U('uBlobOn'),uBlobPh=U('uBlobPh'),uContact=U('uContact'),uProgG=U('uProg'),
   // the shared front + per-theme backdrop, declared in the field chunk and so
   // present in BOTH programs — these names must match the bU list in drawBg
@@ -3647,7 +3684,7 @@ const FORCE_THEME =(m=>{ if(!m) return null; const v=m[1];
   return i>=0?i:null; })(location.search.match(/[?&]theme=([\w-]+)/));
 const FORCE_SPREAD=(m=>m?Math.min(Math.max(parseFloat(m[1]),0),1):null)(location.search.match(/[?&]spread=([\d.]+)/));
 // Per-frame theme state, consumed by BOTH programs (drawBg reads it too).
-const TS={ A:0,B:0,u:0,prog:0, riseT:0,spreadT:0, blob:[0,-2,0,0.09], blobOn:0, blobPh:0,
+const TS={ A:0,B:0,u:0,prog:0, oct:0, riseT:0,spreadT:0, blob:[0,-2,0,0.09], blobOn:0, blobPh:0,
            contact:[0,0], frontC:[0,0], frontR:3.6,
            matA:null,matB:null,matBlob:null,
            bgA:[0,0,0,0],bgB:[0,0,0,0], bgPatA:0,bgPatB:0 };
@@ -3795,6 +3832,10 @@ function themeFrame(parx, pary){
   TS.blobOn=(riseT>0)?(1-sstep(0.86,1.0,absorb)):0;
   TS.blobPh=u*7.0+tNow*0.55;   // note #3: wobble keeps living when the scroll stops
   TS.A=A; TS.B=B; TS.u=u; TS.prog=progP;
+  // OCTAGON weight: TRON (skinId 4) asks for the chamfered silhouette. Ramped on the
+  // spread so the form MORPHS between rounded box and octagon with the theme.
+  const isTron=i=>V4_THEMES.bgPat(i)===4?1:0;
+  TS.oct = isTron(A)*(1-spreadT) + isTron(B)*spreadT;
   TS.riseT=riseT; TS.spreadT=spreadT;
   TS.matA=V4_THEMES.mat(A,false); TS.matB=V4_THEMES.mat(B,false); TS.matBlob=V4_THEMES.mat(B,true);
   TS.bgA=V4_THEMES.bg(A); TS.bgB=V4_THEMES.bg(B);
@@ -4426,7 +4467,7 @@ function loop(now){
   gl.uniform1f(uFrontPhg, TS.blobPh); gl.uniform2fv(uFrontCg, TS.frontC);
   gl.uniform4fv(uBgInkAg, TS.bgA); gl.uniform4fv(uBgInkBg, TS.bgB);
   gl.uniform1i(uBgPatAg, TS.bgPatA); gl.uniform1i(uBgPatBg, TS.bgPatB);
-  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1fv(uMnIU,mnBuf); gl.uniform1f(uFoldGU, repGrowth(kLive, nLive)); gl.uniform4fv(uTxtU,tgt.txt); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1fv(uMnIU,mnBuf); gl.uniform1f(uFoldGU, repGrowth(kLive, nLive)); gl.uniform1f(uOctU, TS.oct); gl.uniform4fv(uTxtU,tgt.txt); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
   // ---- SCISSOR #gl to the glass bbox (v4.3 perf; the v3-handoff lever). ----
   // Everything this program draws — glass body + rim + contact shadow — lives
   // inside the union of the drawn cells and the blob; every pixel outside it
