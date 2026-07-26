@@ -734,7 +734,8 @@ uniform float uProg;       // global scroll progress (field's archetype morph)
 // procedural envAt() dome. Decode is L = rgb*a*uEnvRange; roughness picks a mip
 // via uEnvMaxLod. (envMap/envDir defined below, next to envAt.)
 uniform sampler2D uEnv; uniform float uEnvRange, uEnvMaxLod;
-uniform float uEnvScroll;  // normalised scroll 0..1 — turns the studio as you scroll
+uniform float uEnvScroll;
+uniform float uEnvBlur;    // 0..1 — how fast the room is turning; softens the reflection while it moves  // normalised scroll 0..1 — turns the studio as you scroll
 // uSpreadT / uFrontR / uFrontPh / uFrontC and the backdrop's per-theme ink and
 // pattern ids are declared in the shared field chunk (spliced in below), so the
 // glass and the background canvas read ONE front from ONE declaration.
@@ -2088,6 +2089,20 @@ Pat patTron(vec3 seam, float gain, Geo G, vec3 a0, float r0, float m0){
   o.emis = seam*gain*( base*floorE*core*0.62
                      + base*hot*(2.60+2.40*q8)
                      +      halo*(0.10+0.13*q8) );
+  // NOTE #6: keep the traces from running THROUGH the copy. The layout's spine sits
+  // near panel centre, which is exactly where the headline and body sit, so the
+  // glowing traces were crossing the text. Fade the EMISSION over an elliptical
+  // copy zone around the panel centroid (wider than tall, as text blocks are) —
+  // the etched grooves themselves stay (they are dark and cost no legibility), so
+  // the surface still reads as milled, but the light flows around the words rather
+  // than under them. TRN_CLR keeps a faint ember inside so traces don't just vanish.
+  // Masked in G.pw directly: the trace layout is authored in absolute G.pw coords
+  // centred near the panel, whereas G.cw is the dominant-form centre in a different
+  // (pre-parallax) space — using it put the ellipse in the wrong place entirely.
+  const float TRN_TXW=0.78, TRN_TXH=0.62, TRN_CLR=0.10;
+  vec2  txr = vec2(G.pw.x/TRN_TXW, G.pw.y/TRN_TXH);
+  float txm = smoothstep(0.55, 1.10, length(txr));   // 0 over the copy, 1 outside it
+  o.emis *= mix(TRN_CLR, 1.0, txm);
   return o; }
 
 // ---------- 5 KILN (v7) ------------------------------------------------------
@@ -2204,7 +2219,13 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
   // (well off the env's ~72deg horizon harmonic, so a sweep never lands back on an
   // equivalent room); the pointer adds a little yaw + a CLAMPED pitch so the HDRI
   // floor can never swing overhead. Per-skin `rot` stays the base longitude.
-  float envYaw   = rot + uPar.x*0.9;   // pointer-driven only — scroll coupling caused reflection shimmer + a post-stop rim settle
+  // NOTE #2: the studio turns CONTINUOUSLY with scroll (owner: the lighting change
+  // is otherwise hard to see). The earlier attempt shimmered because it swept a
+  // SHARP env: high-frequency HDRI detail strobed under rotation. Two guards make
+  // it smooth — uEnvScroll is a rate-limited scroll value fed from JS (no stepping),
+  // and uEnvBlur below softens the reflection in proportion to how fast the room is
+  // actually turning, so detail can never strobe while it moves.
+  float envYaw   = rot + uEnvScroll*2.1 + uPar.x*0.9;
   float envPitch = clamp(-uPar.y*0.6, -0.32, 0.32);
   gCY = cos(envYaw); gSY = sin(envYaw);
   gCP = cos(envPitch); gSP = sin(envPitch);
@@ -2216,6 +2237,14 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
   // uSrc; the site's "behind" is the scrolling backdrop canvas, read via the
   // fine/coarse field. Only the transmissive skins (LAGOON, AMBER) pay for it;
   // the opaque metals/lacquer/terracotta skip the 8-tap loop entirely.
+  // NOTE #4: build the BUMP-PERTURBED normal BEFORE the interior leg, so the
+  // refraction below bends with the wave geometry rather than with the smooth
+  // panel. That is what turns LAGOON's ripple into real INTERNAL CAUSTICS: where
+  // the rippled normals make refracted rays converge, the transmitted image
+  // concentrates and brightens on its own — the caustic is a consequence of the
+  // geometry, not a painted-on colour.
+  vec3 gSn=vec3(P.bump,0.0);
+  vec3 nWave=normalize(g.n-(gSn-g.n*dot(g.n,gSn)));
   vec3 refr = vec3(0.0);
   vec3 tintS = tint0 * P.tint;
   // §4.1 view vector, hoisted: the interior leg below needs it too.
@@ -2238,7 +2267,7 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
     // the real geometry (edges bend hard, the crown barely), instead of the old
     // fixed screen-space offset that bent everything the same amount.
     const float IOR=1.48;
-    vec3 nF   = g.n;                                   // front normal (surface->out)
+    vec3 nF   = nWave;                                 // WAVE-perturbed front normal (note #4)
     vec3 dIn  = refract(-Vv, nF, 1.0/IOR);             // into the glass
     vec2 exitOff = vec2(0.0);
     if (dot(dIn,dIn) > 1e-6){
@@ -2281,8 +2310,7 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
   oRefr = refr;
 
   // ---- ONE-SUN SHADING via the HDRI (the lab's shade tail, verbatim) --------
-  vec3 gS=vec3(P.bump,0.0);
-  vec3 nG=normalize(g.n-(gS-g.n*dot(g.n,gS)));          // bump-perturbed normal
+  vec3 nG=nWave;                                        // bump-perturbed normal (hoisted above)
   // fold the pattern's own micro-normal variance AND the site's measured
   // fwidth(n) specular AA into the roughness, in quadrature.
   float rough=clamp(sqrt(P.rough*P.rough + 6.25*P.nvar*P.nvar + 6.25*g.rghAA*g.rghAA),0.0,1.0);
@@ -2303,7 +2331,7 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
   vec3  F0=mix(vec3(0.04),P.alb,P.metal);
   vec3  Fr=F0+(max(vec3(1.0-rough),F0)-F0)*pow(1.0-NdV,5.0);
   vec3  envS;
-  float sRough=specRough(rough);
+  float sRough=clamp(specRough(rough)+uEnvBlur*0.45,0.0,1.0);   // NOTE #2: soften while turning
   if(abs(P.aniso)>0.002){
     float sp=0.26*abs(P.aniso);
     envS = 0.25*envMap(normalize(Rr-sp*Sdir),sRough)
@@ -3269,7 +3297,7 @@ const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uNu=U('uN'),uCorner=
   // present in BOTH programs — these names must match the bU list in drawBg
   uSpreadT=U('uSpreadT'),uFrontRg=U('uFrontR'),uFrontPhg=U('uFrontPh'),uFrontCg=U('uFrontC'),
   uBgInkAg=U('uBgInkA'),uBgInkBg=U('uBgInkB'),uBgPatAg=U('uBgPatA'),uBgPatBg=U('uBgPatB'),
-  uEnv=U('uEnv'),uEnvRange=U('uEnvRange'),uEnvMaxLod=U('uEnvMaxLod'),uEnvScroll=U('uEnvScroll');
+  uEnv=U('uEnv'),uEnvRange=U('uEnvRange'),uEnvMaxLod=U('uEnvMaxLod'),uEnvScroll=U('uEnvScroll'),uEnvBlur=U('uEnvBlur');
 gl.enable(gl.BLEND);
 gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -3747,6 +3775,11 @@ let cur={ cells:STATES[0].cells.map(c=>c.slice()), k:STATES[0].k, corner:STATES[
 // instead of a permanent global lag, ease ONLY across a rebuild: snapshot the live
 // geometry when one fires and blend off it over REBUILD_MS. Cells still track scroll
 // exactly the rest of the time.
+// NOTE #2 continuous scroll lighting: envS is a rate-limited copy of scroll progress
+// (never steps, so the room turns smoothly even under wheel/momentum), and envBlur
+// tracks how fast it is turning so the reflection can be softened while it moves —
+// that, not removing the coupling, is what kills the shimmer.
+let envS=0, envBlur=0, envSPrev=0;
 const REBUILD_MS=260;
 let reFrom=null, reAt=-1e9, pendingRebuild=false;
 function noteRebuild(){ reFrom=cur.cells.map(c=>c.slice()); reAt=performance.now(); }
@@ -3934,6 +3967,9 @@ function loop(now){
   // spring the live params toward target (frost-like smoothing)
   const sp=reduced?1:0.16;
   cur.k+=(tgt.k-cur.k)*sp; cur.corner+=(tgt.corner-cur.corner)*sp;
+  // env follows scroll with a gentle rate limit; blur tracks |d(env)/dframe|
+  envSPrev=envS; envS+=(progP-envS)*(reduced?1:0.22);
+  envBlur+=(Math.min(1,Math.abs(envS-envSPrev)*38)-envBlur)*0.25;
   // cells track the (already mt-eased) target DIRECTLY — the extra spring was pure
   // lag that made the corner (0.55*mn) settle for ~800ms after a fling stopped.
   // run any deferred re-measure only once the morph has settled (see pendingRebuild)
@@ -4024,7 +4060,7 @@ function loop(now){
   gl.uniform1f(uFrontPhg, TS.blobPh); gl.uniform2fv(uFrontCg, TS.frontC);
   gl.uniform4fv(uBgInkAg, TS.bgA); gl.uniform4fv(uBgInkBg, TS.bgB);
   gl.uniform1i(uBgPatAg, TS.bgPatA); gl.uniform1i(uBgPatBg, TS.bgPatB);
-  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive);
+  gl.uniform1f(uTime,now*0.001); gl.uniform4fv(uCells,cellBuf); gl.uniform1i(uNu,nLive); gl.uniform1f(uCorner,cur.corner); gl.uniform1f(uK,kLive); gl.uniform1f(uEnvScroll,envS); gl.uniform1f(uEnvBlur,envBlur);
   // ---- SCISSOR #gl to the glass bbox (v4.3 perf; the v3-handoff lever). ----
   // Everything this program draws — glass body + rim + contact shadow — lives
   // inside the union of the drawn cells and the blob; every pixel outside it
