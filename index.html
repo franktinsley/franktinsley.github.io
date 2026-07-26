@@ -4117,7 +4117,16 @@ function themeFrame(parx, pary){
   // Held to the very end of the absorb ramp: blobOn gates the GEOMETRY, so it must
   // not reach zero until the blob is genuinely swallowed. It is the last 6% now,
   // by which point the centre is 1.55r inside the panel and r is down to 28%.
-  TS.blobOn=(riseT>0)?(1-sstep(0.94,1.0,absorb)):0;
+  // RISING BLOB RETIRED. The owner's verdict: it "randomly shows up and moves in
+  // weird ways", and with the touch blob in place it is a second, competing object
+  // that nobody asked for. Verified safe to drop: the theme takeover is
+  // mix(gA, gB, sprd), driven entirely by the dissolve front — this blob only ever
+  // added an accent overlay on top (mix(glass, gBl, wB)). Zeroing blobOn gates it
+  // out of soapDist AND soapSolve, so it costs nothing rather than being drawn
+  // invisibly. The whole rise/absorb calculation above is left intact and inert:
+  // it is the reference for how a form should merge into a panel, and the touch
+  // blob will want exactly that behaviour when it grows one.
+  TS.blobOn=0;
   TS.blobPh=u*7.0+tNow*0.55;   // note #3: wobble keeps living when the scroll stops
   TS.A=A; TS.B=B; TS.u=u; TS.prog=progP;
   // OCTAGON weight: TRON (skinId 4) asks for the chamfered silhouette. Ramped on the
