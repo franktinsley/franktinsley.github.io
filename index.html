@@ -850,7 +850,7 @@ float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return 
 const float REFR_GAIN = 1.8;  // how much of the true refracted exit offset to apply
 const float SOAP_R2   = 0.70710678;
 const float SOAP_TRL  = 0.21;   // TRON roll, x the soap roll — a crisp face, not a pillow
-const float SOAP_TPR  = 0.72;   // end taper: how fast the end caps slope inward
+const float SOAP_TPR  = 0.26;   // end taper: how fast the end caps slope inward
 const float SOAP_TPX  = 0.81155; // = normalize(1,SOAP_TPR).x, for the gradient
 const float SOAP_TPY  = 0.58432; // = normalize(1,SOAP_TPR).y
 const float TRN_NK    = 0.10;   // notch corner softness, x mn   // octagon: corner cut along the diagonal, x mn
