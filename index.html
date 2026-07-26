@@ -849,7 +849,8 @@ float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return 
 // every production-clamped request — there is no clamp-boundary regime.
 const float REFR_GAIN = 1.8;  // how much of the true refracted exit offset to apply
 const float SOAP_R2   = 0.70710678;
-const float SOAP_OCC  = 0.62;   // octagon: corner cut along the diagonal, x mn
+const float SOAP_OCC  = 0.70;
+const float TRN_NK    = 0.10;   // notch corner softness, x mn   // octagon: corner cut along the diagonal, x mn
 const float SOAP_OCW  = 0.34;   // and its OWN shoulder width, x the main roll's.
                                 // The main roll's w is 0.55R, which on a wide panel
                                 // is as large as the whole SHORT axis — inherit that
@@ -2614,6 +2615,41 @@ void main(){
   if (lagW > 0.001){
     float wh = wtrHeight((p - par) + vec2(0.0, uScroll*WTR_CURR));   // same drift as the shading
     d += lagW * WTR_LINE * (0.5 - 0.5*wh);
+  }
+
+  // TRON NOTCHES — the silhouette STEPS, the way a laid-out panel does.
+  // A 45 chamfer alone cannot get there on this aspect ratio: the panel is about
+  // twice as wide as it is tall, so the chamfer planes from opposite corners meet
+  // before the cut is deep enough to read, and it degenerates straight into a
+  // pointed eye. There is no setting between "invisible" and "broken". The angular
+  // character in the reference art is not chamfers, it is NOTCHES cut into the long
+  // edges — so cut them.
+  //
+  // Subtracted with a SMOOTH max, not a plain one: max() would leave a hard crease
+  // at every notch corner, and the standing verdict is that this glass curves
+  // continuously everywhere. smax rounds the reentrant corners at the same scale the
+  // roll rounds the convex ones, so a notch reads as milled rather than as clipped.
+  if (uOct > 0.001){
+    vec2 pn = p - par - ctrG;
+    float k = TRN_NK*mnG;
+    // Each notch box is CENTRED ON THE EDGE LINE (y = +/-mnG, the panel's short
+    // half-axis), so subtracting it takes a bite OUT of the edge. Centred inside
+    // instead — which is what a first pass did — it carves a hole in the middle of
+    // the glass, which reads as damage rather than as design. Depth is a fraction of
+    // the box's own half-height, so these break the edge line without eating the
+    // panel: the reference steps its outline, it does not chew it.
+    vec2 q1 = abs(pn - vec2(-0.62*mnG,  mnG)) - vec2(0.42*mnG, 0.13*mnG);
+    float n1 = length(max(q1,vec2(0.0))) + min(max(q1.x,q1.y),0.0);
+    // bottom edge, right of centre — shallower, and deliberately NOT mirrored
+    vec2 q2 = abs(pn - vec2( 0.78*mnG, -mnG)) - vec2(0.30*mnG, 0.10*mnG);
+    float n2 = length(max(q2,vec2(0.0))) + min(max(q2.x,q2.y),0.0);
+    // a short second step beside the first, so the top edge reads as a STAIR
+    vec2 q3 = abs(pn - vec2( 0.02*mnG,  mnG)) - vec2(0.16*mnG, 0.07*mnG);
+    float n3 = length(max(q3,vec2(0.0))) + min(max(q3.x,q3.y),0.0);
+    float cut = min(min(n1, n2), n3);
+    float h = clamp(0.5 - 0.5*(-cut - d)/k, 0.0, 1.0);
+    float sm = mix(-cut, d, h) + k*h*(1.0-h);          // smooth max(d, -cut)
+    d = mix(d, sm, uOct);
   }
 
   // ---- THE FRONT, on the glass ----------------------------------------------
