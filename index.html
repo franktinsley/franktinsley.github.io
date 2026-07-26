@@ -2636,11 +2636,25 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, vec2 patOff, out vec3 oSpec, out vec3 oRe
       // costs legibility (§5: the thickness cue survives moderation, the highlights don't).
       exitOff = (hitXY + exitDrift)*REFR_GAIN*(1.0 - 0.55*clamp(comp,0.0,1.0));
     }
+    // ADAPTIVE TAP COUNT. This loop is the single most expensive thing the shader
+    // does — fieldFine() is a whole backdrop evaluation (caustics, strata, the lot) —
+    // and ONLY the transmissive skins run it, which is why AMBER and LAGOON are the
+    // slowest states. It was a fixed 8.
+    // But look at the scale: blurR peaks at 0.0016 while one pixel is 2/uRefH, i.e.
+    // 0.0025 at dpr1. The whole sample disc fits INSIDE ONE PIXEL across most of the
+    // panel, so seven of the eight taps were landing on the same texel and averaging
+    // to the value the first one already had. The disc only opens up near the rim,
+    // where rimP and roughness both climb — which is exactly where the count now
+    // rises. Floor of 2 keeps a pair averaging everywhere (the AA note is right that
+    // one sharp tap is not safe to ship); the ceiling is the old 8, so the widest
+    // case is unchanged. Coherent across a warp too, since blurR varies smoothly.
+    int nT = int(clamp(ceil(2.0*blurR/max(g.px,1e-6)), 2.0, 8.0));
     for(int i=0;i<8;i++){
-      float fi=float(i); float rr=sqrt((fi+0.5)/8.0)*blurR; float ang=fi*GA+g.ja;
+      if(i>=nT) break;
+      float fi=float(i); float rr=sqrt((fi+0.5)/float(nT))*blurR; float ang=fi*GA+g.ja;
       refr += fieldFine(g.spC + vec2(cos(ang),sin(ang))*rr + P.ripple + exitOff, g.ss, uScroll, g.bgF);
     }
-    refr/=8.0;
+    refr/=float(nT);
     refr += fieldCoarse(g.spC + P.ripple + exitOff, uScroll, g.bgF);
     // §4.2 FREE THICKNESS (thick-glass port): Beer-Lambert over the REAL path length
     // 2h. The soap solid is symmetric about z=0, so an orthographic ray enters at
