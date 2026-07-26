@@ -1247,6 +1247,7 @@ struct Geo { float dep; vec2 pw; vec3 nrm; float thk; float px; float ndv; float
 const float WTR_BETA=0.40, WTR_SPD=0.32, WTR_DEPTH=0.42, WTR_SOFT=0.0130;
 const float WTR_WIDE=0.220, WTR_AAK=0.28;
 const float WTR_KNEE=7.0, WTR_CURR=0.03, WTR_BUMP=0.10, WTR_REFR=0.035;
+const float WTR_LINE=0.020;   // water-line amplitude, y-normalised (~8px at 813)
 const float WTR_NVK=15.628;
 // TRANSMISSION.  The old body was a flat near-black albedo plus a logTint ramp
 // that multiplied out to ~1e-5 in red and ~0.02 in green at the crown, so
@@ -2259,7 +2260,13 @@ struct GlassGeo {
 // worst exactly in the middle of every transition, which is the moment the page
 // is asking to be looked at. So each theme shades the same geometry to
 // completion, independently, and the front dissolves the finished pictures.
-vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
+// patOff shifts the PATTERN SAMPLE SPACE. Panels pass 0 (pattern authored in
+// panel space). The BLOB passes its own centre, so its material is sampled in
+// BLOB-LOCAL coords and therefore TRAVELS WITH THE OBJECT. Sampling it in the
+// shared p-space -- which is what this did -- pinned the pattern to the screen
+// and let the blob slide across it, so the blob read as a moving WINDOW onto a
+// material layer rather than as a solid that has a material.
+vec3 shadeGlass(vec4 M[6], GlassGeo g, vec2 patOff, out vec3 oSpec, out vec3 oRefr){
   // ---- unpack the v5 skin block (repacked for the lab materials) -----------
   //   M[0]=(albedo, rough)   M[1]=(seam, gain)    M[2]=(tint, trans)
   //   M[3]=(logTint, metal)  M[4]=(coat, croug, envRot, skinId)
@@ -2291,7 +2298,7 @@ vec3 shadeGlass(vec4 M[6], GlassGeo g, out vec3 oSpec, out vec3 oRefr){
   gCY = cos(envYaw); gSY = sin(envYaw);
   gCP = cos(envPitch); gSP = sin(envPitch);
   // lab Geo, built from the site's one geometry solve
-  Geo G; G.dep=g.thk*SOAP_THK*g.mn; G.pw=g.pp; G.nrm=g.n; G.thk=g.thk; G.px=g.px; G.ndv=g.nz; G.mnp=g.mn; G.cw=g.cw;
+  Geo G; G.dep=g.thk*SOAP_THK*g.mn; G.pw=g.pp-patOff; G.nrm=g.n; G.thk=g.thk; G.px=g.px; G.ndv=g.nz; G.mnp=g.mn; G.cw=g.cw;
   Pat P = patMat(id, seam, gain, logt, G, alb0, rough0, metal0);
 
   // ---- TRANSMISSION — the backdrop seen THROUGH the glass. The lab sampled
@@ -2429,7 +2436,26 @@ void main(){
   float mnG;   // dominant-form mn, folded on the field's weights
   float wB;    // blob material weight, folded on the same weights
   vec2  ctrG;  // dominant-form centre (p-par space), folded on the same weights
+  float sprd = dissolveFront(p - par, uContact);   // hoisted: the water line below is skin-gated
   float d = soapDist(p - par, px, mnG, wB, ctrG);   // z=0 union field: coverage, rim, body, shadow
+
+  // THE WATER LINE — wire it up. wtrHeight() has existed since the LAGOON skin
+  // landed, and its own comment says "main() adds this to the union distance for
+  // this skin only, so the outline of a body of water undulates instead of being a
+  // ground glass edge" — but nothing ever called it. The ripple was therefore a
+  // NORMAL-map only: the surface shaded as though it were moving while the form it
+  // belonged to sat perfectly still, which is exactly what reads as fake.
+  // Gated on the live skin (LAGOON == skinId 1) and blended through the dissolve,
+  // so no other material inherits a wobbling edge. INWARD-ONLY, per that comment:
+  // pushing the boundary outward exposes a sliver where soapForm already returned
+  // the flat exterior normal, which renders as a pale flat lip around the form.
+  float lagA = abs(uMatA[4].w - 1.0) < 0.5 ? 1.0 : 0.0;
+  float lagB = abs(uMatB[4].w - 1.0) < 0.5 ? 1.0 : 0.0;
+  float lagW = mix(lagA, lagB, clamp(sprd, 0.0, 1.0));
+  if (lagW > 0.001){
+    float wh = wtrHeight((p - par) + vec2(0.0, uScroll*WTR_CURR));   // same drift as the shading
+    d += lagW * WTR_LINE * (0.5 - 0.5*wh);
+  }
 
   // ---- THE FRONT, on the glass ----------------------------------------------
   // The SAME dissolveFront the backdrop uses, evaluated in the panel's own space
@@ -2437,7 +2463,6 @@ void main(){
   // it is one event and not two animations that happen to share a clock. At
   // uSpreadT=1 the radius exceeds any panel extent, so the takeover completes;
   // scrubbing back shrinks it to nothing.
-  float sprd = dissolveFront(p - par, uContact);
 
   vec2 spB = p - parF;                       // screen-space sample point
   // The FIELD is no longer drawn here — the scrolling background canvas owns it.
@@ -2495,23 +2520,23 @@ void main(){
     // call this shader has always made.
     vec3 glass, spec, refr;
     if (wB >= 0.999){
-      glass = shadeGlass(uMatBlob, g, spec, refr);
+      glass = shadeGlass(uMatBlob, g, uBlob.xy-uPar, spec, refr);
     } else {
       if (sprd <= 0.001){
-        glass = shadeGlass(uMatA, g, spec, refr);
+        glass = shadeGlass(uMatA, g, vec2(0.0), spec, refr);
       } else if (sprd >= 0.999){
-        glass = shadeGlass(uMatB, g, spec, refr);
+        glass = shadeGlass(uMatB, g, vec2(0.0), spec, refr);
       } else {
         vec3 sA, rA, sB, rB;
-        vec3 gA = shadeGlass(uMatA, g, sA, rA);
-        vec3 gB = shadeGlass(uMatB, g, sB, rB);
+        vec3 gA = shadeGlass(uMatA, g, vec2(0.0), sA, rA);
+        vec3 gB = shadeGlass(uMatB, g, vec2(0.0), sB, rB);
         glass = mix(gA, gB, sprd); spec = mix(sA, sB, sprd); refr = mix(rA, rB, sprd);
       }
       // the blob is always fully its own material where it dominates the union;
       // it fades out naturally as it is absorbed (r -> 0, so wB -> 0)
       if (wB > 0.001){
         vec3 sBl, rBl;
-        vec3 gBl = shadeGlass(uMatBlob, g, sBl, rBl);
+        vec3 gBl = shadeGlass(uMatBlob, g, uBlob.xy-uPar, sBl, rBl);
         glass = mix(glass, gBl, wB); spec = mix(spec, sBl, wB); refr = mix(refr, rBl, wB);
       }
     }
