@@ -854,46 +854,22 @@ uniform float uOct;            // 0 = rounded box, 1 = rounded OCTAGON. The TRON
                                // form morphs between the two rather than switching.
 uniform float uFoldG;          // repGrowth(uK, uN): the fold chain's coincident growth.
                                // The corner subtracts it because the fold adds it back.
-uniform vec3  uTrail[8];       // pointer/touch trail: xy = point (p-space), z = strength.
-                               // Newest first, strength decaying with age. Zero = unused.
-// LIQUID TRAIL. Injected into bs — the cell's CORE BOX — not into d or into the
-// normal. Three reasons that is the right seam:
-//   * bs inflates the SOLID, so the silhouette bulges AND the surface domes. Adding
-//     to d would move the outline only, and do nothing at all when the pointer is
-//     over the middle of a panel, which is most of it.
-//   * it flows through the existing solve, so thickness, absorption and the
-//     refracted interior leg all follow the bulge for free.
-//   * the normal stays correct, because the bulge's gradient folds into gxy below.
-//     A bump-only version shades flat, which is exactly what made LAGOON's ripple
-//     read as fake before it moved the geometry.
-// Radius must be SMALL relative to the trail's own spacing, or the points blanket
-// the panel and it reads as the whole form inflating rather than as a stroke. At
-// 0.34 (~138px) eight overlapping gaussians covered everything. 0.10 (~40px)
-// against a 22px sample spacing gives enough overlap to fuse into a continuous
-// tube along the path, and no more.
-const float TRL_R = 0.10;      // bulge radius (p-space)
-const float TRL_A = 0.075;     // peak inflation (widens the core box)
-const float TRL_H = 5.0;       // and lifts thickness, x the bulge — this is the dome
-void trailBulge(vec2 p, out float b, out vec2 gb){
-  b = 0.0; gb = vec2(0.0);
-  for (int i = 0; i < 8; i++){
-    float s = uTrail[i].z;
-    if (s <= 0.002) continue;
-    // Trail points arrive ALREADY in p-par space — the parallax is subtracted on the
-    // JS side at upload. Doing it here instead needs uPar, which is not in scope for
-    // every shader this chunk compiles into ('uPar : undeclared identifier').
-    vec2 dp = p - uTrail[i].xy;
-    float q = dot(dp,dp)/(TRL_R*TRL_R);
-    if (q > 8.0) continue;                      // gaussian is dead past ~3 sigma
-    float e = exp(-q)*s*TRL_A;
-    // MAX, not sum. Summing overlapping gaussians compounds them — eight trail
-    // points at full strength added up to ~8x the intended inflation and ballooned
-    // the panel into an amorphous blob. A trail is the UNION of its bumps, so the
-    // envelope is what is wanted, and max() keeps the peak at exactly TRL_A however
-    // many points overlap. Gradient comes from whichever point is currently winning.
-    if (e > b){ b = e; gb = dp*(e*(-2.0/(TRL_R*TRL_R))); }
-  }
-}
+uniform vec4  uTouch[4];       // xy = centre, z = radius, w = unused. Radius 0 = slot free.
+// TOUCH BLOBS. Each is its OWN FORM unioned into the field — not a deformation of a
+// cell. That distinction is the whole feature: a deformation is contained to the
+// panel it deforms, whereas a form merges gooily where it overlaps a panel and
+// FLOATS FREE where it does not, which is what lets a touch drift off the glass and
+// up the screen as you scroll.
+// They are anchored in DOCUMENT space (JS records y + scroll and subtracts the live
+// scroll each frame), so they travel with the content. The point is scroll feedback:
+// every state here is PINNED and morphs in place, so nothing else on the page moves
+// 1:1 with a scroll gesture. These do.
+// Folded ALONGSIDE the cell chain, never inside it — growing NCELL would put them in
+// nLive, and repGrowth(k,n) stepping with the cell count is the corner jump.
+// Both of these were far too large on a phone: TCH_R 0.19 with TCH_K 0.13 is ~80px
+// of blob inside ~55px of merge softness, which fused into one amorphous mass over
+// half the screen instead of reading as a distinct drop of glass.
+const float TCH_K = 0.045;     // merge softness against the panels
 uniform float uMnI[NCELL];     // INTENT mn per cell (min half-size before compensation).
                                // uCells.zw is the COMPENSATED box, whose shrink cancels the
                                // fold chain's growth so the union EDGE lands on the intent.
@@ -1084,13 +1060,8 @@ void soapCell(int i, vec2 p, float px,
   float S0 = R + 0.5*w;                       // shrink: edge silhouette lands on b
   float cap = 0.92*mn;
   if (S0 > cap){ float f = cap/S0; R *= f; w *= f; S0 = cap; }
-  float tb; vec2 tgb; trailBulge(p, tb, tgb);      // liquid pointer trail (see uTrail)
-  vec2 bs = max(b - S0, vec2(0.02*mn)) + vec2(tb);
-  // The trail raises local THICKNESS as well as widening the core box. Widening
-  // alone only shows near the EDGE — in the middle of a panel the top is already
-  // flat at full height, so there is nothing for a wider box to lift. Scaling TH is
-  // what puts a DOME under the pointer, which is the part that reads as liquid.
-  float TH = SOAP_THK*mn*(1.0 + tb*TRL_H);
+  vec2 bs = max(b - S0, vec2(0.02*mn));
+  float TH = SOAP_THK*mn;
   vec2 rel = p - uCells[i].xy;
   vec2 q = abs(rel) - bs;
   float dsx, dsy;
@@ -1141,11 +1112,8 @@ void soapCell(int i, vec2 p, float px,
   a4 = ar2*ar2;
   Rc = R;
   // grad picks up the diagonal too: d(qd)/dx = SOAP_R2*sign(x), same for y.
-  // q = |rel| - bs, and bs now carries the trail bulge, so d(q)/d(p) picks up -tgb.
-  // Without this term the bulge would be a silhouette change with a flat normal —
-  // geometry that does not catch the light, which reads as a smear, not a dome.
-  gxy = r2 * vec2((sx*dsx*(sign(rel.x)-tgb.x) + sd*dsd*SOAP_R2*sign(rel.x)),
-                  (sy*dsy*(sign(rel.y)-tgb.y) + sd*dsd*SOAP_R2*sign(rel.y)));
+  gxy = r2 * vec2((sx*dsx + sd*dsd*SOAP_R2)*sign(rel.x),
+                  (sy*dsy + sd*dsd*SOAP_R2)*sign(rel.y));
   float TH2 = TH*TH; th4 = TH2*TH2;
   mnO = mn;
 }
@@ -1210,6 +1178,17 @@ float soapDist(vec2 p, float px, out float mnc, out float wBlob, out vec2 ctr){
     float dph; g += uK*sqPhi((fi - g)/uK, dph);
     mnc = mix(mnc, mncell, dph);
     ctr = mix(ctr, uCells[i].xy, dph);
+  }
+  for (int i = 0; i < 4; i++){
+    float R = uTouch[i].z;
+    if (R <= 0.0005) continue;
+    float cb = length(p - uTouch[i].xy);
+    float dph; g += TCH_K*sqPhi(((cb - R) - g)/TCH_K, dph);
+    // NEITHER mnc NOR ctr is perturbed. Both feed the SHADING — mnc is the roll and
+    // scale, ctr is the dominant-form centre every pattern samples around — so
+    // dragging them toward a small blob made the merged region shade as a different
+    // material entirely, and it rendered as a black mass rather than as glass. The
+    // blob contributes GEOMETRY only; it should look like the same glass, displaced.
   }
   wBlob = 0.0;
   if (uBlobOn > 0.0){
@@ -1278,6 +1257,17 @@ float soapSolve(vec2 p, float px, out vec3 nrm){
       g += uK*ph;
       dg = mix(dg, dfi, dph);
     }
+    for (int i = 0; i < 4; i++){
+      float R = uTouch[i].z;
+      if (R <= 0.0005) continue;
+      float cb  = length(p - uTouch[i].xy);
+      float sz  = sqrt(zeta);
+      float tb  = sqrt(max(cb*cb + sz, 1e-12));      // sphere: sqrt(c^2+z^2)-R
+      float dfb = 0.25/max(tb*max(sz, 1e-9), 1e-12);
+      float dph; float ph = sqPhi(((tb - R) - g)/TCH_K, dph);
+      g += TCH_K*ph;
+      dg = mix(dg, dfb, dph);
+    }
     if (blob){
       float sz  = sqrt(zeta);                        // = z^2
       float tb  = sqrt(max(bC*bC + sz, 1e-12));
@@ -1303,6 +1293,19 @@ float soapSolve(vec2 p, float px, out vec3 nrm){
     float dph; float ph = sqPhi((fi - g)/uK, dph);
     g += uK*ph;
     G = mix(G, Gi, dph);
+  }
+  for (int i = 0; i < 4; i++){
+    float R = uTouch[i].z;
+    if (R <= 0.0005) continue;
+    vec2  dv = p - uTouch[i].xy;
+    float cb = length(dv);
+    float gc = cb > 1e-9 ? 1.0/cb : 0.0;
+    float sz = sqrt(zeta);
+    float tb = sqrt(max(cb*cb + sz, 1e-12));
+    vec3  Gt = vec3(dv*gc*cb, z)/tb;                 // grad of sqrt(c^2+z^2)-R
+    float dph; float ph = sqPhi(((tb - R) - g)/TCH_K, dph);
+    g += TCH_K*ph;
+    G = mix(G, Gt, dph);
   }
   if (blob){
     float sz = sqrt(zeta);
@@ -3784,7 +3787,7 @@ const U=n=>gl.getUniformLocation(prog,n);
 // uLight is RETIRED (v4.5: the key light is the shader const KEY_L — one sun,
 // not a knob). The lookup stays (null) so tests/glass-zoom.js's unguarded
 // uniform3f(uLight,...) remains a legal no-op instead of a ReferenceError.
-const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uPanU=U('uPan'),uOctU=U('uOct'),uFoldGU=U('uFoldG'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uTrailU=U('uTrail[0]'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
+const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uPanU=U('uPan'),uOctU=U('uOct'),uFoldGU=U('uFoldG'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uTouchU=U('uTouch[0]'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
   uMatA=U('uMatA[0]'),uMatB=U('uMatB[0]'),uMatBlob=U('uMatBlob[0]'),uBlobU=U('uBlob'),uBlobOn=U('uBlobOn'),uBlobPh=U('uBlobPh'),uContact=U('uContact'),uProgG=U('uProg'),
   // the shared front + per-theme backdrop, declared in the field chunk and so
   // present in BOTH programs — these names must match the bU list in drawBg
@@ -3863,7 +3866,15 @@ const BG_M=200;
 let bgDocTop=0;
 function layoutBg(){
   if(!bgl) return;
-  const vh=vpH(), cssH=vh+2*BG_M;   // BG_M overhang retained: covers rubber-band overscroll
+  // Size from the LARGEST height anything reports, not just clientHeight. With
+  // viewport-fit=cover the physical screen can be taller than the layout viewport,
+  // so a canvas sized to clientHeight can stop short of the notch and the home
+  // indicator — the backdrop then falls back to background-color in exactly the
+  // bands that are most visible on a phone. Taking the max costs nothing (the canvas
+  // is already overhung by 2*BG_M and clipped by the viewport) and cannot under-cover.
+  const vv = window.visualViewport;
+  const vh = Math.max(vpH(), window.innerHeight||0, vv?vv.height:0);
+  const cssH = vh+2*BG_M;           // BG_M overhang: covers rubber-band overscroll
   // clamp at 0: nothing paints above the document origin, so at the very top of the
   // page the status-bar band falls back to the page background-color.
   // Clamp to the DOCUMENT. #bg is absolutely positioned, so it contributes to the
@@ -4606,48 +4617,49 @@ function moved(nx,ny){
 // stays valid while the document scrolls under it — the finger's SCREEN position
 // is what the field wants, not its document position.
 const toField=(cx,cy)=>[(cx-GLR.left)*dpr, (GLR.height-(cy-GLR.top))*dpr];
-// ---- LIQUID TRAIL ---------------------------------------------------------
-// A ring of recent pointer/touch positions, each fading out on its own clock, so
-// the panels bulge along the path the finger took and reflow behind it.
-// Sampled by DISTANCE, not by event: pointermove fires at whatever rate the device
-// feels like (120Hz on this display, far less mid-gesture on a phone), so time- or
-// event-sampling gives a trail whose length depends on hardware. A minimum spacing
-// makes the trail a fixed length in SPACE — it looks the same on every device, and
-// a slow drag leaves the same mark as a fast one instead of a dense clot.
-const NTRAIL=8, TRL_MS=520, TRL_GAP=0.055;
-// mirrors of the shader consts of the same name — kept in step by hand; they only
-// feed the scissor margin, which must cover everything the bulge can reach.
-const TRL_A=0.075, TRL_R=0.10;
-const trailBuf=new Float32Array(NTRAIL*3);
-const trail=[];                                   // newest first: {x,y,t}
-function trailPush(nx,ny){
-  const t=performance.now();
-  if(trail.length){
-    const h=trail[0], dx=nx-h.x, dy=ny-h.y;
-    if(dx*dx+dy*dy < TRL_GAP*TRL_GAP){ h.x=nx; h.y=ny; h.t=t; return; }
+// ---- TOUCH BLOBS ----------------------------------------------------------
+// A touch drops a blob of glass at that point which then SCROLLS WITH THE PAGE and
+// fades over several seconds. It exists for feedback: every state on this page is
+// PINNED and morphs in place, so nothing here moves 1:1 with a scroll gesture and
+// the page can feel unresponsive to the drag itself. These are the one thing that
+// tracks the content, so a scroll always has a visible consequence.
+const NTOUCH=4, TCH_MS=4200, TCH_R=0.085, TCH_GAP=0.30;
+const touchBuf=new Float32Array(NTOUCH*4);
+const touches=[];                                  // newest first: {x,y0,t}
+// Scroll in the shader's own units: p is (2*frag-res)/res.y, so one unit is H/2
+// device px and scrolling `scrollY` CSS px is 2*scrollY*dpr/H of them.
+const scrollUnits=()=>H?2*scrollY*dpr/H:0;
+function touchDrop(nx,ny){
+  const t=performance.now(), sc=scrollUnits();
+  const x=(2*nx-W)/H, y=(2*ny-H)/H;                // device px -> shader units
+  if(touches.length){
+    const h=touches[0], dx=x-h.x, dy=(y-sc)-h.y0;
+    // One blob per gesture, not per event: a drag would otherwise stamp dozens.
+    // Refresh the newest instead while the finger stays within TCH_GAP.
+    if(dx*dx+dy*dy < TCH_GAP*TCH_GAP){ h.x=x; h.y0=y-sc; h.t=t; return; }
   }
-  trail.unshift({x:nx,y:ny,t});
-  if(trail.length>NTRAIL) trail.length=NTRAIL;
+  touches.unshift({x, y0:y-sc, t});                // y0 is DOCUMENT-anchored
+  if(touches.length>NTOUCH) touches.length=NTOUCH;
 }
-function trailUpload(now,parx,pary){
+function touchUpload(now,parx,pary){
+  const sc=scrollUnits();
   let n=0;
-  for(let i=0;i<trail.length;i++){
-    const a=(now-trail[i].t)/TRL_MS;
-    if(a>=1) break;                               // ordered newest-first, so the rest are older
-    // smootherstep out: eases at BOTH ends, so a point neither pops in nor snaps
-    // off — the tail has to dissolve, or the whole thing reads as a stutter.
-    const u=1-a, s=u*u*u*(10.0+u*(-15.0+6.0*u));
-    // toField() gives DEVICE PIXELS (y-up); the shader works in (2*frag - res)/res.y.
-    // Uploading raw pixels made every distance astronomically large, so exp(-q) was
-    // zero everywhere and the bulge silently did nothing. Normalise here.
-    // ...and shifted into p-par space here, to match what soapCell() works in.
-    trailBuf[n*3]=(2*trail[i].x-W)/H-parx; trailBuf[n*3+1]=(2*trail[i].y-H)/H-pary; trailBuf[n*3+2]=s; n++;
+  for(let i=0;i<touches.length;i++){
+    const a=(now-touches[i].t)/TCH_MS;
+    if(a>=1) break;                                // newest-first, so the rest are older
+    const u=1-a, e=u*u*u*(10+u*(-15+6*u));         // smootherstep: no pop in or out
+    touchBuf[n*4]   = touches[i].x - parx;
+    touchBuf[n*4+1] = touches[i].y0 + sc - pary;   // document-anchored -> screen
+    touchBuf[n*4+2] = TCH_R*e;                     // radius carries the fade, so the
+    touchBuf[n*4+3] = 0;                           // blob SHRINKS away rather than
+    n++;                                           // being switched off mid-size
   }
-  for(let i=n;i<NTRAIL;i++){ trailBuf[i*3]=0; trailBuf[i*3+1]=0; trailBuf[i*3+2]=0; }
-  if(trail.length>n) trail.length=n;              // drop the dead tail
+  for(let i=n;i<NTOUCH;i++){ touchBuf[i*4]=0; touchBuf[i*4+1]=0; touchBuf[i*4+2]=0; touchBuf[i*4+3]=0; }
+  if(touches.length>n) touches.length=n;
+  return n;
 }
-function track(cx,cy){ const [nx,ny]=toField(cx,cy); moved(nx,ny); mx=nx; my=ny; trailPush(nx,ny); }
-function jump(cx,cy){ const [nx,ny]=toField(cx,cy); activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; trailPush(nx,ny); }
+function track(cx,cy){ const [nx,ny]=toField(cx,cy); moved(nx,ny); mx=nx; my=ny; }
+function jump(cx,cy){ const [nx,ny]=toField(cx,cy); activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; touchDrop(nx,ny); }
 addEventListener('pointermove',e=>track(e.clientX,e.clientY),{passive:true});
 // touch/tap (or mouse press): jump the focal to the touch point and go active,
 // so tapping the screen moves the reactive glow there even without a drag
@@ -4796,7 +4808,7 @@ function loop(now){
   // p is y-normalised over [-1,1], so S css px of travel is 2S/height in p-units.
   gl.uniform1f(uScroll, GLR.height>0 ? 2.0*scrollY*SCROLL_K/GLR.height : 0.0);
   gl.uniform1f(uRefH, H||1);   // this canvas IS the reference; #bg keys off the same value
-  trailUpload(now,parx,pary); gl.uniform3fv(uTrailU, trailBuf);
+  const nTouch=touchUpload(now,parx,pary); gl.uniform4fv(uTouchU, touchBuf);
   gl.uniform2f(uPar,parx,pary); gl.uniform2f(uSwell,wx,wy);
   // (no uLight write — KEY_L is a shader const since v4.5, the one-sun rule)
   gl.uniform1f(uDbg, window.__dbg||0);   // dev inspection hook (see tests/glass-zoom.js)
@@ -4837,14 +4849,26 @@ function loop(now){
   // owner saw outside the panel. TRL_A is the peak inflation (max(), so it cannot
   // exceed that however many points overlap) and TRL_R is how far the falloff still
   // reaches; anything beyond is below the exp cutoff and cannot mark a pixel.
-  const smar=repGrowth(kLive,nLive)+0.06+0.05+Math.abs(parx)+Math.abs(pary)+TRL_A+TRL_R;
+  const smar=repGrowth(kLive,nLive)+0.06+0.05+Math.abs(parx)+Math.abs(pary);
   // p=(2·fragCoord−uRes)/uRes.y and the glass sits at cells+par (soapDist
   // samples p−par), so fragCoord = ((p+par)·H+extent)/2; y is bottom-up in both
   // gl_FragCoord and scissor space, so no flip.
-  const sX0=Math.max(0,Math.floor(((bbx0-smar+parx)*H+W)/2)),
-        sX1=Math.min(W,Math.ceil (((bbx1+smar+parx)*H+W)/2)),
-        sY0=Math.max(0,Math.floor(((bby0-smar+pary)*H+H)/2)),
-        sY1=Math.min(H,Math.ceil (((bby1+smar+pary)*H+H)/2));
+  let sX0=Math.max(0,Math.floor(((bbx0-smar+parx)*H+W)/2)),
+      sX1=Math.min(W,Math.ceil (((bbx1+smar+parx)*H+W)/2)),
+      sY0=Math.max(0,Math.floor(((bby0-smar+pary)*H+H)/2)),
+      sY1=Math.min(H,Math.ceil (((bby1+smar+pary)*H+H)/2));
+  // TOUCH BLOBS live OUTSIDE the cells — that is the point of them — so the scissor,
+  // which is derived from the cells, would cut them off with a hard straight edge
+  // (exactly the artifact the owner caught on the contained version). Union each live
+  // blob's own bounds in. Only while one is alive, so a page at rest still pays the
+  // tight box. TCH_K is added because the merge softness reaches past the radius.
+  for(let i=0;i<nTouch;i++){
+    const bx=touchBuf[i*4], by=touchBuf[i*4+1], br=touchBuf[i*4+2]+0.045+0.02;
+    sX0=Math.min(sX0,Math.max(0,Math.floor(((bx-br+parx)*H+W)/2)));
+    sX1=Math.max(sX1,Math.min(W,Math.ceil (((bx+br+parx)*H+W)/2)));
+    sY0=Math.min(sY0,Math.max(0,Math.floor(((by-br+pary)*H+H)/2)));
+    sY1=Math.max(sY1,Math.min(H,Math.ceil (((by+br+pary)*H+H)/2)));
+  }
   gl.disable(gl.SCISSOR_TEST);
   gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);   // transparent: #bg shows through
   if(!(window.__dbg>0) && sX1>sX0 && sY1>sY0){
