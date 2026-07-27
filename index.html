@@ -3983,7 +3983,17 @@ function themeFrame(parx, pary){
   }
   const RISE0=0.04, CONTACT=0.40, DONE=0.62;
   const riseT   = clamp01((u-RISE0)/(CONTACT-RISE0));
-  const spreadT = clamp01((u-CONTACT)/(DONE-CONTACT));
+  // The front cannot advance while the blob is unarmed: an unarmed blob carries the
+  // CURRENT theme, so there is nothing for it to deliver. This is what makes the
+  // touch blob's trip out to an edge and back actually matter rather than being
+  // decoration over a theme change that was going to happen anyway.
+  const _su=scrollUnits(), _dsu=Math.abs(_su-_lastSU); _lastSU=_su;
+  // Gate on the blob being NEAR the panel, not on riseT hitting exactly 1. riseT is
+  // derived from u, which resets at every segment boundary, so it frequently never
+  // reaches 1 while a blob is in flight — measured: the front never advanced at all.
+  // 0.55 is past the point the blob is visibly touching.
+  if(blobArmed && riseT>=0.55) blobSpread=Math.min(1, blobSpread+_dsu*SPREAD_RATE);
+  const spreadT = blobArmed ? blobSpread : 0;
   // contact point: the lowest edge of the OUTGOING state's SETTLED cells —
   // STATES[segI], constant for the whole segment.
   // Two review rounds shaped this. Round 1: separated states have EXACTLY tied
@@ -4068,11 +4078,18 @@ function themeFrame(parx, pary){
   // LATCHED at the moment the rise begins. Re-reading the touch mid-flight would
   // teleport a blob that is already moving; the origin is a starting condition, not
   // a live input.
-  if(riseT<=0.001){
+  if(riseT<=0.001 && blobArmed){
     const fresh = touches.length && (performance.now()-touches[0].t) < 1400;
-    blobOrigin[0] = fresh ? touches[0].x : TS.contact[0];
-    blobOrigin[1] = fresh ? (touches[0].y0 + scrollUnits())
-                          : (scrollDown ? -1.55 : 1.55);
+    if(fresh){
+      // Touch: start at the finger, UNARMED. Anchored in document space so it
+      // drifts with the scroll — that drift IS the scroll feedback, and it is also
+      // what eventually carries it off an edge.
+      blobArmed=false; blobDocX=touches[0].x; blobDocY=touches[0].y0;
+      touches.length=0;                     // consumed; no second blob from it
+    } else {
+      blobOrigin[0]=TS.contact[0];
+      blobOrigin[1]=scrollDown ? -1.55 : 1.55;
+    }
   }
   const startX=blobOrigin[0], startY=blobOrigin[1];
   // NOTE #3: the blob cluster FLOATS on its own clock and merely FLOWS UPWARD with
@@ -4117,16 +4134,32 @@ function themeFrame(parx, pary){
   // Held to the very end of the absorb ramp: blobOn gates the GEOMETRY, so it must
   // not reach zero until the blob is genuinely swallowed. It is the last 6% now,
   // by which point the centre is 1.55r inside the panel and r is down to 28%.
-  // RISING BLOB RETIRED. The owner's verdict: it "randomly shows up and moves in
-  // weird ways", and with the touch blob in place it is a second, competing object
-  // that nobody asked for. Verified safe to drop: the theme takeover is
-  // mix(gA, gB, sprd), driven entirely by the dissolve front — this blob only ever
-  // added an accent overlay on top (mix(glass, gBl, wB)). Zeroing blobOn gates it
-  // out of soapDist AND soapSolve, so it costs nothing rather than being drawn
-  // invisibly. The whole rise/absorb calculation above is left intact and inert:
-  // it is the reference for how a form should merge into a panel, and the touch
-  // blob will want exactly that behaviour when it grows one.
-  TS.blobOn=0;
+  TS.blobOn=(riseT>0)?(1-sstep(0.94,1.0,absorb)):0;
+  // Back to IDLE once this blob is fully swallowed AND its front has finished: only
+  // then may a touch spawn another. That gate is what stopped the competing-objects
+  // mess — without it every tap stacked a new blob onto one already in flight.
+  if(blobArmed && spreadT>=0.999 && TS.blobOn<=0.001){ blobSpread=0; }
+
+  // ---- DRIFTING: an unarmed, touch-spawned blob ---------------------------
+  // It ignores the rise path entirely and just hangs in the DOCUMENT, so scrolling
+  // carries it up or down the screen at 1:1. When it leaves the screen it WRAPS to
+  // the opposite edge and arms, and from then on it follows the ordinary rise ->
+  // contact -> absorb path above, which is why that machinery is reused rather than
+  // duplicated. Size is held constant while drifting: it is a travelling object, not
+  // one being absorbed, and shrinking it here would read as it dying on the way.
+  if(!blobArmed){
+    const yNow = blobDocY + scrollUnits();
+    TS.blob[0]=blobDocX; TS.blob[1]=yNow; TS.blob[2]=R0*0.62;
+    TS.blob[3]=Math.min(0.5*TS.blob[2], 0.075);
+    TS.blobOn=1;
+    if(Math.abs(yNow) > 1.45){
+      // Off the top or bottom -> re-enter from the OTHER side, now carrying the
+      // next/previous theme. The wrap is the arming; nothing else arms it.
+      blobArmed=true;
+      blobOrigin[0]=blobDocX;
+      blobOrigin[1]=-Math.sign(yNow)*1.55;
+    }
+  }
   TS.blobPh=u*7.0+tNow*0.55;   // note #3: wobble keeps living when the scroll stops
   TS.A=A; TS.B=B; TS.u=u; TS.prog=progP;
   // OCTAGON weight: TRON (skinId 4) asks for the chamfered silhouette. Ramped on the
@@ -4134,7 +4167,13 @@ function themeFrame(parx, pary){
   const isTron=i=>V4_THEMES.bgPat(i)===4?1:0;
   TS.oct = isTron(A)*(1-spreadT) + isTron(B)*spreadT;
   TS.riseT=riseT; TS.spreadT=spreadT;
-  TS.matA=V4_THEMES.mat(A,false); TS.matB=V4_THEMES.mat(B,false); TS.matBlob=V4_THEMES.mat(B,true);
+  TS.matA=V4_THEMES.mat(A,false); TS.matB=V4_THEMES.mat(B,false);
+  // An UNARMED blob wears the CURRENT theme. That is what makes it pass through the
+  // panel as a visual no-op on its way to an edge — same material in, same material
+  // out — with no collision test or ignore-flag needed. The identity falls out of
+  // the material itself. Wrapping swaps it to the incoming theme, and only then can
+  // merging change anything.
+  TS.matBlob=V4_THEMES.mat(blobArmed ? B : A, true);
   TS.bgA=V4_THEMES.bg(A); TS.bgB=V4_THEMES.bg(B);
   TS.bgPatA=V4_THEMES.bgPat(A); TS.bgPatB=V4_THEMES.bgPat(B);
   // (no separate bg crossfade scalar any more: the backdrop reads the same
@@ -4657,6 +4696,25 @@ const toField=(cx,cy)=>[(cx-GLR.left)*dpr, (GLR.height-(cy-GLR.top))*dpr];
 // on the first try or it may as well not exist.
 const NTOUCH=4, TCH_MS=4200, TCH_R=0.22, TCH_GAP=0.30;
 const blobOrigin=[0,-1.55];   // latched at rise start — see the note in the timeline
+// BLOB LIFECYCLE. One blob at a time; a touch does not create a second, it decides
+// where this one starts and whether it is already ARMED.
+//   armed   = carrying the NEXT/PREV theme, so merging re-themes the panel.
+//   unarmed = carrying the CURRENT theme, so merging is a visual no-op and it
+//             passes straight through. Only WRAPPING off an edge arms it.
+// Scroll-spawned blobs come from off-screen and are armed on arrival — nothing to
+// discover, so a visitor who never touches still gets every state.
+// Touch-spawned blobs start ON screen carrying the current theme, so they must
+// drift out and wrap before they can do anything.
+let blobArmed=true, blobDocX=0, blobDocY=0;
+// The spread gets its OWN clock, accumulated from scroll travel, instead of reading
+// the segment's u. u is where the SCROLL is, and once the blob drives the theme
+// those are no longer the same thing: a blob that arms late finds u already past
+// DONE and the front would snap to complete in one frame instead of spreading.
+// Measured that happening — armed at scroll 700 with u=0.838, spreadT went 0 -> 1
+// instantly. Accumulating means the front always takes the same amount of scrolling
+// to cross, wherever in the segment it started.
+let blobSpread=0, _lastSU=0;
+const SPREAD_RATE=1.9;
 let scrollDown=true, _lastSY=0;
 addEventListener('scroll',()=>{ const y=scrollY; if(y!==_lastSY){ scrollDown = y>_lastSY; _lastSY=y; } },{passive:true});
 const touchBuf=new Float32Array(NTOUCH*4);
