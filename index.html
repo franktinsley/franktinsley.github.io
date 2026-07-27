@@ -854,22 +854,6 @@ uniform float uOct;            // 0 = rounded box, 1 = rounded OCTAGON. The TRON
                                // form morphs between the two rather than switching.
 uniform float uFoldG;          // repGrowth(uK, uN): the fold chain's coincident growth.
                                // The corner subtracts it because the fold adds it back.
-uniform vec4  uTouch[4];       // xy = centre, z = radius, w = unused. Radius 0 = slot free.
-// TOUCH BLOBS. Each is its OWN FORM unioned into the field — not a deformation of a
-// cell. That distinction is the whole feature: a deformation is contained to the
-// panel it deforms, whereas a form merges gooily where it overlaps a panel and
-// FLOATS FREE where it does not, which is what lets a touch drift off the glass and
-// up the screen as you scroll.
-// They are anchored in DOCUMENT space (JS records y + scroll and subtracts the live
-// scroll each frame), so they travel with the content. The point is scroll feedback:
-// every state here is PINNED and morphs in place, so nothing else on the page moves
-// 1:1 with a scroll gesture. These do.
-// Folded ALONGSIDE the cell chain, never inside it — growing NCELL would put them in
-// nLive, and repGrowth(k,n) stepping with the cell count is the corner jump.
-// Both of these were far too large on a phone: TCH_R 0.19 with TCH_K 0.13 is ~80px
-// of blob inside ~55px of merge softness, which fused into one amorphous mass over
-// half the screen instead of reading as a distinct drop of glass.
-const float TCH_K = 0.075;     // merge softness against the panels
 uniform float uMnI[NCELL];     // INTENT mn per cell (min half-size before compensation).
                                // uCells.zw is the COMPENSATED box, whose shrink cancels the
                                // fold chain's growth so the union EDGE lands on the intent.
@@ -1179,17 +1163,6 @@ float soapDist(vec2 p, float px, out float mnc, out float wBlob, out vec2 ctr){
     mnc = mix(mnc, mncell, dph);
     ctr = mix(ctr, uCells[i].xy, dph);
   }
-  for (int i = 0; i < 4; i++){
-    float R = uTouch[i].z;
-    if (R <= 0.0005) continue;
-    float cb = length(p - uTouch[i].xy);
-    float dph; g += TCH_K*sqPhi(((cb - R) - g)/TCH_K, dph);
-    // NEITHER mnc NOR ctr is perturbed. Both feed the SHADING — mnc is the roll and
-    // scale, ctr is the dominant-form centre every pattern samples around — so
-    // dragging them toward a small blob made the merged region shade as a different
-    // material entirely, and it rendered as a black mass rather than as glass. The
-    // blob contributes GEOMETRY only; it should look like the same glass, displaced.
-  }
   wBlob = 0.0;
   if (uBlobOn > 0.0){
     float cb, Rb, mnb; vec2 gcb;
@@ -1257,17 +1230,6 @@ float soapSolve(vec2 p, float px, out vec3 nrm){
       g += uK*ph;
       dg = mix(dg, dfi, dph);
     }
-    for (int i = 0; i < 4; i++){
-      float R = uTouch[i].z;
-      if (R <= 0.0005) continue;
-      float cb  = length(p - uTouch[i].xy);
-      float sz  = sqrt(zeta);
-      float tb  = sqrt(max(cb*cb + sz, 1e-12));      // sphere: sqrt(c^2+z^2)-R
-      float dfb = 0.25/max(tb*max(sz, 1e-9), 1e-12);
-      float dph; float ph = sqPhi(((tb - R) - g)/TCH_K, dph);
-      g += TCH_K*ph;
-      dg = mix(dg, dfb, dph);
-    }
     if (blob){
       float sz  = sqrt(zeta);                        // = z^2
       float tb  = sqrt(max(bC*bC + sz, 1e-12));
@@ -1293,19 +1255,6 @@ float soapSolve(vec2 p, float px, out vec3 nrm){
     float dph; float ph = sqPhi((fi - g)/uK, dph);
     g += uK*ph;
     G = mix(G, Gi, dph);
-  }
-  for (int i = 0; i < 4; i++){
-    float R = uTouch[i].z;
-    if (R <= 0.0005) continue;
-    vec2  dv = p - uTouch[i].xy;
-    float cb = length(dv);
-    float gc = cb > 1e-9 ? 1.0/cb : 0.0;
-    float sz = sqrt(zeta);
-    float tb = sqrt(max(cb*cb + sz, 1e-12));
-    vec3  Gt = vec3(dv*gc*cb, z)/tb;                 // grad of sqrt(c^2+z^2)-R
-    float dph; float ph = sqPhi(((tb - R) - g)/TCH_K, dph);
-    g += TCH_K*ph;
-    G = mix(G, Gt, dph);
   }
   if (blob){
     float sz = sqrt(zeta);
@@ -3787,7 +3736,7 @@ const U=n=>gl.getUniformLocation(prog,n);
 // uLight is RETIRED (v4.5: the key light is the shader const KEY_L — one sun,
 // not a knob). The lookup stays (null) so tests/glass-zoom.js's unguarded
 // uniform3f(uLight,...) remains a legal no-op instead of a ReferenceError.
-const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uPanU=U('uPan'),uOctU=U('uOct'),uFoldGU=U('uFoldG'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uTouchU=U('uTouch[0]'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
+const uRes=U('uRes'),uTime=U('uTime'),uCells=U('uCells[0]'),uMnIU=U('uMnI[0]'),uPanU=U('uPan'),uOctU=U('uOct'),uFoldGU=U('uFoldG'),uTxtU=U('uTxt'),uNu=U('uN'),uCorner=U('uCorner'),uK=U('uK'),uPar=U('uPar'),uScroll=U('uScroll'),uRefH=U('uRefH'),uSwell=U('uSwell'),uLight=U('uLight'),uDbg=U('uDbg'),
   uMatA=U('uMatA[0]'),uMatB=U('uMatB[0]'),uMatBlob=U('uMatBlob[0]'),uBlobU=U('uBlob'),uBlobOn=U('uBlobOn'),uBlobPh=U('uBlobPh'),uContact=U('uContact'),uProgG=U('uProg'),
   // the shared front + per-theme backdrop, declared in the field chunk and so
   // present in BOTH programs — these names must match the bU list in drawBg
@@ -3866,15 +3815,7 @@ const BG_M=200;
 let bgDocTop=0;
 function layoutBg(){
   if(!bgl) return;
-  // Size from the LARGEST height anything reports, not just clientHeight. With
-  // viewport-fit=cover the physical screen can be taller than the layout viewport,
-  // so a canvas sized to clientHeight can stop short of the notch and the home
-  // indicator — the backdrop then falls back to background-color in exactly the
-  // bands that are most visible on a phone. Taking the max costs nothing (the canvas
-  // is already overhung by 2*BG_M and clipped by the viewport) and cannot under-cover.
-  const vv = window.visualViewport;
-  const vh = Math.max(vpH(), window.innerHeight||0, vv?vv.height:0);
-  const cssH = vh+2*BG_M;           // BG_M overhang: covers rubber-band overscroll
+  const vh=vpH(), cssH=vh+2*BG_M;   // BG_M overhang retained: covers rubber-band overscroll
   // clamp at 0: nothing paints above the document origin, so at the very top of the
   // page the status-bar band falls back to the page background-color.
   // Clamp to the DOCUMENT. #bg is absolutely positioned, so it contributes to the
@@ -3983,17 +3924,7 @@ function themeFrame(parx, pary){
   }
   const RISE0=0.04, CONTACT=0.40, DONE=0.62;
   const riseT   = clamp01((u-RISE0)/(CONTACT-RISE0));
-  // The front cannot advance while the blob is unarmed: an unarmed blob carries the
-  // CURRENT theme, so there is nothing for it to deliver. This is what makes the
-  // touch blob's trip out to an edge and back actually matter rather than being
-  // decoration over a theme change that was going to happen anyway.
-  const _su=scrollUnits(), _dsu=Math.abs(_su-_lastSU); _lastSU=_su;
-  // Gate on the blob being NEAR the panel, not on riseT hitting exactly 1. riseT is
-  // derived from u, which resets at every segment boundary, so it frequently never
-  // reaches 1 while a blob is in flight — measured: the front never advanced at all.
-  // 0.55 is past the point the blob is visibly touching.
-  if(blobArmed && riseT>=0.55) blobSpread=Math.min(1, blobSpread+_dsu*SPREAD_RATE);
-  const spreadT = blobArmed ? blobSpread : 0;
+  const spreadT = clamp01((u-CONTACT)/(DONE-CONTACT));
   // contact point: the lowest edge of the OUTGOING state's SETTLED cells —
   // STATES[segI], constant for the whole segment.
   // Two review rounds shaped this. Round 1: separated states have EXACTLY tied
@@ -4067,31 +3998,7 @@ function themeFrame(parx, pary){
   // it. No gate is doing the hiding — the geometry is.
   const absorb=sstep(0.0,0.85,spreadT);
   const r=R0*(0.85+0.25*riseT)*(1-0.72*absorb);   // and shrink harder on the way in
-  // WHERE THE BLOB COMES FROM. It always exists — the theme takeover is
-  // scroll-deterministic and must never depend on the visitor having touched, or a
-  // mouse user who only scrolls would never see a state change. So a touch does not
-  // CREATE the blob, it only relocates its ORIGIN:
-  //   * no touch  -> off the edge it is travelling from: below when scrolling down,
-  //                  above when scrolling up, so it always enters against the motion
-  //                  and reads as being carried in by the scroll.
-  //   * recent touch -> straight out of the point that was touched.
-  // LATCHED at the moment the rise begins. Re-reading the touch mid-flight would
-  // teleport a blob that is already moving; the origin is a starting condition, not
-  // a live input.
-  if(riseT<=0.001 && blobArmed){
-    const fresh = touches.length && (performance.now()-touches[0].t) < 1400;
-    if(fresh){
-      // Touch: start at the finger, UNARMED. Anchored in document space so it
-      // drifts with the scroll — that drift IS the scroll feedback, and it is also
-      // what eventually carries it off an edge.
-      blobArmed=false; blobDocX=touches[0].x; blobDocY=touches[0].y0;
-      touches.length=0;                     // consumed; no second blob from it
-    } else {
-      blobOrigin[0]=TS.contact[0];
-      blobOrigin[1]=scrollDown ? -1.55 : 1.55;
-    }
-  }
-  const startX=blobOrigin[0], startY=blobOrigin[1];
+  const startY=-1.55;
   // NOTE #3: the blob cluster FLOATS on its own clock and merely FLOWS UPWARD with
   // the scroll, instead of being a pure function of scroll position. tNow is real
   // time, so the drift keeps moving when you stop and never replays identically;
@@ -4099,10 +4006,7 @@ function themeFrame(parx, pary){
   const tNow=performance.now()*0.001;
   const driftX=0.055*Math.sin(tNow*0.37+segI*2.1)+0.028*Math.sin(tNow*0.83+1.7);
   const driftY=0.030*Math.sin(tNow*0.29+0.9)+0.016*Math.sin(tNow*0.61+2.4);
-  // x now travels from the origin to the contact point too, so a touch off to one
-  // side sends the blob in on a diagonal rather than teleporting it to centre.
-  TS.blob[0]=startX+(TS.contact[0]-startX)*easeO(riseT)
-            +0.10*Math.sin(6.0*u+segI*2.1)*(1-0.6*riseT)+driftX*(1-0.5*riseT);
+  TS.blob[0]=TS.contact[0]+0.10*Math.sin(6.0*u+segI*2.1)*(1-0.6*riseT)+driftX*(1-0.5*riseT);
   const yRest=TS.contact[1]-r*0.35;          // floating just under the panel
   // yDeep is measured off the PANEL'S OWN BOTTOM EDGE, not off contact. contact sits
   // BELOW the panel edge, so "above contact" never meant "inside the panel" — the blob
@@ -4135,31 +4039,6 @@ function themeFrame(parx, pary){
   // not reach zero until the blob is genuinely swallowed. It is the last 6% now,
   // by which point the centre is 1.55r inside the panel and r is down to 28%.
   TS.blobOn=(riseT>0)?(1-sstep(0.94,1.0,absorb)):0;
-  // Back to IDLE once this blob is fully swallowed AND its front has finished: only
-  // then may a touch spawn another. That gate is what stopped the competing-objects
-  // mess — without it every tap stacked a new blob onto one already in flight.
-  if(blobArmed && spreadT>=0.999 && TS.blobOn<=0.001){ blobSpread=0; }
-
-  // ---- DRIFTING: an unarmed, touch-spawned blob ---------------------------
-  // It ignores the rise path entirely and just hangs in the DOCUMENT, so scrolling
-  // carries it up or down the screen at 1:1. When it leaves the screen it WRAPS to
-  // the opposite edge and arms, and from then on it follows the ordinary rise ->
-  // contact -> absorb path above, which is why that machinery is reused rather than
-  // duplicated. Size is held constant while drifting: it is a travelling object, not
-  // one being absorbed, and shrinking it here would read as it dying on the way.
-  if(!blobArmed){
-    const yNow = blobDocY + scrollUnits();
-    TS.blob[0]=blobDocX; TS.blob[1]=yNow; TS.blob[2]=R0*0.62;
-    TS.blob[3]=Math.min(0.5*TS.blob[2], 0.075);
-    TS.blobOn=1;
-    if(Math.abs(yNow) > 1.45){
-      // Off the top or bottom -> re-enter from the OTHER side, now carrying the
-      // next/previous theme. The wrap is the arming; nothing else arms it.
-      blobArmed=true;
-      blobOrigin[0]=blobDocX;
-      blobOrigin[1]=-Math.sign(yNow)*1.55;
-    }
-  }
   TS.blobPh=u*7.0+tNow*0.55;   // note #3: wobble keeps living when the scroll stops
   TS.A=A; TS.B=B; TS.u=u; TS.prog=progP;
   // OCTAGON weight: TRON (skinId 4) asks for the chamfered silhouette. Ramped on the
@@ -4167,13 +4046,7 @@ function themeFrame(parx, pary){
   const isTron=i=>V4_THEMES.bgPat(i)===4?1:0;
   TS.oct = isTron(A)*(1-spreadT) + isTron(B)*spreadT;
   TS.riseT=riseT; TS.spreadT=spreadT;
-  TS.matA=V4_THEMES.mat(A,false); TS.matB=V4_THEMES.mat(B,false);
-  // An UNARMED blob wears the CURRENT theme. That is what makes it pass through the
-  // panel as a visual no-op on its way to an edge — same material in, same material
-  // out — with no collision test or ignore-flag needed. The identity falls out of
-  // the material itself. Wrapping swaps it to the incoming theme, and only then can
-  // merging change anything.
-  TS.matBlob=V4_THEMES.mat(blobArmed ? B : A, true);
+  TS.matA=V4_THEMES.mat(A,false); TS.matB=V4_THEMES.mat(B,false); TS.matBlob=V4_THEMES.mat(B,true);
   TS.bgA=V4_THEMES.bg(A); TS.bgB=V4_THEMES.bg(B);
   TS.bgPatA=V4_THEMES.bgPat(A); TS.bgPatB=V4_THEMES.bgPat(B);
   // (no separate bg crossfade scalar any more: the backdrop reads the same
@@ -4685,74 +4558,8 @@ function moved(nx,ny){
 // stays valid while the document scrolls under it — the finger's SCREEN position
 // is what the field wants, not its document position.
 const toField=(cx,cy)=>[(cx-GLR.left)*dpr, (GLR.height-(cy-GLR.top))*dpr];
-// ---- TOUCH BLOBS ----------------------------------------------------------
-// A touch drops a blob of glass at that point which then SCROLLS WITH THE PAGE and
-// fades over several seconds. It exists for feedback: every state on this page is
-// PINNED and morphs in place, so nothing here moves 1:1 with a scroll gesture and
-// the page can feel unresponsive to the drag itself. These are the one thing that
-// tracks the content, so a scroll always has a visible consequence.
-// TCH_R was 0.085 — about a 33px droplet, which is there but easy to miss, and
-// reads as "the touch didn't do anything". A touch response has to be unmistakable
-// on the first try or it may as well not exist.
-const NTOUCH=4, TCH_MS=4200, TCH_R=0.22, TCH_GAP=0.30;
-const blobOrigin=[0,-1.55];   // latched at rise start — see the note in the timeline
-// BLOB LIFECYCLE. One blob at a time; a touch does not create a second, it decides
-// where this one starts and whether it is already ARMED.
-//   armed   = carrying the NEXT/PREV theme, so merging re-themes the panel.
-//   unarmed = carrying the CURRENT theme, so merging is a visual no-op and it
-//             passes straight through. Only WRAPPING off an edge arms it.
-// Scroll-spawned blobs come from off-screen and are armed on arrival — nothing to
-// discover, so a visitor who never touches still gets every state.
-// Touch-spawned blobs start ON screen carrying the current theme, so they must
-// drift out and wrap before they can do anything.
-let blobArmed=true, blobDocX=0, blobDocY=0;
-// The spread gets its OWN clock, accumulated from scroll travel, instead of reading
-// the segment's u. u is where the SCROLL is, and once the blob drives the theme
-// those are no longer the same thing: a blob that arms late finds u already past
-// DONE and the front would snap to complete in one frame instead of spreading.
-// Measured that happening — armed at scroll 700 with u=0.838, spreadT went 0 -> 1
-// instantly. Accumulating means the front always takes the same amount of scrolling
-// to cross, wherever in the segment it started.
-let blobSpread=0, _lastSU=0;
-const SPREAD_RATE=1.9;
-let scrollDown=true, _lastSY=0;
-addEventListener('scroll',()=>{ const y=scrollY; if(y!==_lastSY){ scrollDown = y>_lastSY; _lastSY=y; } },{passive:true});
-const touchBuf=new Float32Array(NTOUCH*4);
-const touches=[];                                  // newest first: {x,y0,t}
-// Scroll in the shader's own units: p is (2*frag-res)/res.y, so one unit is H/2
-// device px and scrolling `scrollY` CSS px is 2*scrollY*dpr/H of them.
-const scrollUnits=()=>H?2*scrollY*dpr/H:0;
-function touchDrop(nx,ny){
-  const t=performance.now(), sc=scrollUnits();
-  const x=(2*nx-W)/H, y=(2*ny-H)/H;                // device px -> shader units
-  if(touches.length){
-    const h=touches[0], dx=x-h.x, dy=(y-sc)-h.y0;
-    // One blob per gesture, not per event: a drag would otherwise stamp dozens.
-    // Refresh the newest instead while the finger stays within TCH_GAP.
-    if(dx*dx+dy*dy < TCH_GAP*TCH_GAP){ h.x=x; h.y0=y-sc; h.t=t; return; }
-  }
-  touches.unshift({x, y0:y-sc, t});                // y0 is DOCUMENT-anchored
-  if(touches.length>NTOUCH) touches.length=NTOUCH;
-}
-function touchUpload(now,parx,pary){
-  const sc=scrollUnits();
-  let n=0;
-  for(let i=0;i<touches.length;i++){
-    const a=(now-touches[i].t)/TCH_MS;
-    if(a>=1) break;                                // newest-first, so the rest are older
-    const u=1-a, e=u*u*u*(10+u*(-15+6*u));         // smootherstep: no pop in or out
-    touchBuf[n*4]   = touches[i].x - parx;
-    touchBuf[n*4+1] = touches[i].y0 + sc - pary;   // document-anchored -> screen
-    touchBuf[n*4+2] = TCH_R*e;                     // radius carries the fade, so the
-    touchBuf[n*4+3] = 0;                           // blob SHRINKS away rather than
-    n++;                                           // being switched off mid-size
-  }
-  for(let i=n;i<NTOUCH;i++){ touchBuf[i*4]=0; touchBuf[i*4+1]=0; touchBuf[i*4+2]=0; touchBuf[i*4+3]=0; }
-  if(touches.length>n) touches.length=n;
-  return n;
-}
 function track(cx,cy){ const [nx,ny]=toField(cx,cy); moved(nx,ny); mx=nx; my=ny; }
-function jump(cx,cy){ const [nx,ny]=toField(cx,cy); activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; touchDrop(nx,ny); }
+function jump(cx,cy){ const [nx,ny]=toField(cx,cy); activeX=nx; activeY=ny; lastActive=performance.now(); mx=nx; my=ny; }
 addEventListener('pointermove',e=>track(e.clientX,e.clientY),{passive:true});
 // touch/tap (or mouse press): jump the focal to the touch point and go active,
 // so tapping the screen moves the reactive glow there even without a drag
@@ -4901,7 +4708,6 @@ function loop(now){
   // p is y-normalised over [-1,1], so S css px of travel is 2S/height in p-units.
   gl.uniform1f(uScroll, GLR.height>0 ? 2.0*scrollY*SCROLL_K/GLR.height : 0.0);
   gl.uniform1f(uRefH, H||1);   // this canvas IS the reference; #bg keys off the same value
-  const nTouch=touchUpload(now,parx,pary); gl.uniform4fv(uTouchU, touchBuf);
   gl.uniform2f(uPar,parx,pary); gl.uniform2f(uSwell,wx,wy);
   // (no uLight write — KEY_L is a shader const since v4.5, the one-sun rule)
   gl.uniform1f(uDbg, window.__dbg||0);   // dev inspection hook (see tests/glass-zoom.js)
@@ -4936,32 +4742,14 @@ function loop(now){
   if(TS.blobOn>0){ const b=TS.blob, br=b[2]*1.2+b[3];   // wobble is ≤16% of r; +its own k
     if(b[0]-br<bbx0)bbx0=b[0]-br; if(b[0]+br>bbx1)bbx1=b[0]+br;
     if(b[1]-br<bby0)bby0=b[1]-br; if(b[1]+br>bby1)bby1=b[1]+br; }
-  // + the trail bulge. The scissor box is derived from the CELLS, but the trail
-  // inflates the solid past them — so without this term the bulge is drawn right up
-  // to the scissor edge and then stops dead, which is the straight vertical cut the
-  // owner saw outside the panel. TRL_A is the peak inflation (max(), so it cannot
-  // exceed that however many points overlap) and TRL_R is how far the falloff still
-  // reaches; anything beyond is below the exp cutoff and cannot mark a pixel.
   const smar=repGrowth(kLive,nLive)+0.06+0.05+Math.abs(parx)+Math.abs(pary);
   // p=(2·fragCoord−uRes)/uRes.y and the glass sits at cells+par (soapDist
   // samples p−par), so fragCoord = ((p+par)·H+extent)/2; y is bottom-up in both
   // gl_FragCoord and scissor space, so no flip.
-  let sX0=Math.max(0,Math.floor(((bbx0-smar+parx)*H+W)/2)),
-      sX1=Math.min(W,Math.ceil (((bbx1+smar+parx)*H+W)/2)),
-      sY0=Math.max(0,Math.floor(((bby0-smar+pary)*H+H)/2)),
-      sY1=Math.min(H,Math.ceil (((bby1+smar+pary)*H+H)/2));
-  // TOUCH BLOBS live OUTSIDE the cells — that is the point of them — so the scissor,
-  // which is derived from the cells, would cut them off with a hard straight edge
-  // (exactly the artifact the owner caught on the contained version). Union each live
-  // blob's own bounds in. Only while one is alive, so a page at rest still pays the
-  // tight box. TCH_K is added because the merge softness reaches past the radius.
-  for(let i=0;i<nTouch;i++){
-    const bx=touchBuf[i*4], by=touchBuf[i*4+1], br=touchBuf[i*4+2]+0.075+0.02;
-    sX0=Math.min(sX0,Math.max(0,Math.floor(((bx-br+parx)*H+W)/2)));
-    sX1=Math.max(sX1,Math.min(W,Math.ceil (((bx+br+parx)*H+W)/2)));
-    sY0=Math.min(sY0,Math.max(0,Math.floor(((by-br+pary)*H+H)/2)));
-    sY1=Math.max(sY1,Math.min(H,Math.ceil (((by+br+pary)*H+H)/2)));
-  }
+  const sX0=Math.max(0,Math.floor(((bbx0-smar+parx)*H+W)/2)),
+        sX1=Math.min(W,Math.ceil (((bbx1+smar+parx)*H+W)/2)),
+        sY0=Math.max(0,Math.floor(((bby0-smar+pary)*H+H)/2)),
+        sY1=Math.min(H,Math.ceil (((bby1+smar+pary)*H+H)/2));
   gl.disable(gl.SCISSOR_TEST);
   gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);   // transparent: #bg shows through
   if(!(window.__dbg>0) && sX1>sX0 && sY1>sY0){
