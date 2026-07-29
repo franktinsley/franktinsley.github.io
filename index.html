@@ -229,6 +229,36 @@
   .grid .cell h3{ margin:0 0 6px; font-size:15px; font-weight:600; }
   .grid .cell p{ margin:0; font-size:12.5px; line-height:1.5; color:var(--copy-soft); }
   .grid .cell a, .links a, .lede a{ color:var(--cy); text-decoration:none; border-bottom:1px solid var(--cy-soft); }
+  /* ---- NO-RENDERER FALLBACK --------------------------------------------------
+     Every .state is opacity:0 and stacked in ONE grid area, so the page is blank
+     until the renderer's raf loop fades it in — and the boot overlay's only
+     dismissal lives in that same loop. Anything that throws before the first
+     frame (no WebGL2; a driver that won't compile the field shader) therefore
+     leaves a permanent "Initialising" screen over an empty page. This class is
+     the degraded-but-READABLE page: canvases dropped, states in normal flow.
+     A plain page beats a hung one — especially one being sent to recruiters. */
+  html.nogl #bg, html.nogl #gl, html.nogl #boot{ display:none !important; }
+  html.nogl body{ background:var(--bg-edge); }
+  html.nogl .stage{ position:static; display:block; padding:56px 0 96px; pointer-events:auto; }
+  /* !important because the renderer writes opacity/transform INLINE per frame —
+     if it dies after painting (context loss, a late throw) those inline values
+     survive and would leave the fallback blank. */
+  html.nogl .state{ position:static; opacity:1 !important; transform:none !important; margin:0 auto 64px; pointer-events:auto; }
+  .reel-cta{ display:none; margin:10px 0 0; padding:7px 14px; font:inherit; font-size:11.5px;
+    letter-spacing:0.06em; color:var(--cy); background:transparent; border:1px solid var(--cy-soft);
+    border-radius:999px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  #reelbox[hidden]{ display:none; }
+  #reelbox{ position:fixed; inset:0; z-index:20; background:rgba(3,5,8,.94);
+    display:grid; grid-template-rows:1fr auto; gap:10px; padding:14px; }
+  #reelbox video{ width:100%; height:100%; min-height:0; object-fit:contain; }
+  #reelbox .rb-strip{ display:flex; gap:8px; justify-content:center; }
+  #reelbox .rb-strip button{ width:34px; height:34px; border-radius:50%; padding:0; cursor:pointer;
+    background:transparent; border:1px solid var(--cy-soft); color:var(--cy); font:inherit; font-size:11px; }
+  #reelbox .rb-strip button[aria-current="true"]{ background:var(--cy-soft); }
+  #reelbox .rb-close{ position:absolute; top:12px; right:14px; width:36px; height:36px; border-radius:50%;
+    background:transparent; border:1px solid var(--cy-soft); color:var(--cy); font-size:15px; cursor:pointer; }
+  .reel{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:30px; }
+  .reel video{ width:100%; aspect-ratio:1260/2736; object-fit:cover; display:block; border-radius:12px; background:#0a0e11; cursor:pointer; }
   .rows{ margin-top:8px; text-align:left; display:flex; flex-direction:column; gap:34px; }
   .rows .row{ display:flex; gap:14px; align-items:baseline; font-size:13px; padding:3px 6px; }
   .rows .row .co{ color:var(--ink); font-weight:600; min-width:104px; }
@@ -266,6 +296,15 @@
        gap between separate plates, and the v4.6 corner-aware pads are bigger —
        keep ~8px of real gap or the plates read as touching. */
     .grid{ grid-template-columns:1fr; gap:34px; }
+    /* NO REEL ON PHONES. Each .state is centred in the viewport and must fit it;
+       the work grid alone is already ~670 of ~812, leaving ~140px. A whole 9:19.5
+       frame at any width worth looking at needs 220-310px, so the only way to fit
+       one here is to crop it — and a cropped portrait frame reads as a broken
+       element, not a compact one. So the phone gets a ~30px tap affordance
+       instead, opening the same clips FULLSCREEN — which is the one place a
+       9:19.5 capture is seen at its best. Tablets and desktop keep the reel. */
+    .reel{ display:none; }
+    .reel-cta{ display:block; }
     .grid .cell h3{ font-size:14.5px; margin-bottom:4px; }
     .grid .cell p{ font-size:12px; line-height:1.42; }
     /* 18px, not 26: state 3 carries SIX rows since the Independent 2023–now row
@@ -300,6 +339,13 @@
        the row gap to 9px against 18px of padding. So the gaps stay clear of that
        floor and the height comes out of TYPOGRAPHY instead, which is where there is
        actually slack on a short screen. */
+    /* The reel has no typography to give back — it is fixed video height. A short
+       WIDE screen (the 1280x800 laptop) still has 460px of headroom here, so it
+       keeps the reel, scaled DOWN rather than cropped: height is capped and width
+       follows the source ratio, so the frame stays whole. Cropping a 9:19.5 frame
+       into a short window reads as broken, not as compact. */
+    .reel{ justify-items:center; }
+    .reel video{ height:clamp(140px,24vh,210px); width:auto; }
     .grid{ gap:20px; }   /* > 2*7 pad */
     .grid .cell{ font-size:11.5px; line-height:1.26; }
     .grid .cell h3{ font-size:13px; margin-bottom:2px; }
@@ -718,6 +764,27 @@ vec3 field(vec2 sp, vec2 m, float scr){
 </head>
 <body>
 <div id="boot"><div class="bl">Optical bench</div><div class="bs" id="bootStage">Initialising</div><div class="bp"><i></i></div></div>
+<script>
+// BOOT WATCHDOG — deliberately OUTSIDE the renderer script, and deliberately not
+// depending on anything it defines. The renderer dismisses #boot from inside its
+// raf loop, so every failure that happens BEFORE the first frame (getContext
+// returning null, a shader that won't compile on some driver) keeps the overlay
+// up forever. That is the one failure mode a visitor cannot recover from, and
+// the one this page cannot afford. If the overlay is still up well past the
+// renderer's own 4s backstop, assume no renderer and show the plain page.
+(function () {
+  var degraded = false;
+  function stillBooting() { var b = document.getElementById('boot'); return b && !b.classList.contains('gone'); }
+  function degrade() {
+    if (degraded || !stillBooting()) return;   // healthy page already dismissed: no-op
+    degraded = true;
+    document.documentElement.classList.add('nogl');
+    var b = document.getElementById('boot'); if (b) b.classList.add('gone');
+  }
+  window.addEventListener('error', function () { setTimeout(degrade, 1200); });
+  setTimeout(degrade, 6000);
+})();
+</script>
 <div id="scroll"></div>
 <canvas id="bg"></canvas><!-- the dot field: SCROLLS, so it reaches Safari's bands -->
 <canvas id="gl"></canvas><!-- the glass: position:fixed, transparent elsewhere -->
@@ -768,7 +835,11 @@ vec3 field(vec2 sp, vec2 m, float scr){
       <div class="cell"><h3>SDF modeling engine — Swift + Metal</h3><p>A real-time signed-distance-field
         ray-marching 3D modeler — the whole shader stack, smooth booleans, procedural geometry,
         marching-cubes export to STL/OBJ. Interactive frame rates on iOS, iPadOS and macOS.
-        ~50,000 lines across ~650 commits, built solo. <a href="mailto:franktinsley@me.com?subject=SDF%20engine%20demo">demo on request</a></p></div>
+        ~50,000 lines across ~650 commits, built solo.</p>
+        <!-- Inside the cell, not after the grid: after the grid "it" had no antecedent
+             and read as belonging to the whole section. Phones only — desktop and
+             tablet show the reel itself a few pixels below. -->
+        <button class="reel-cta" type="button" aria-haspopup="dialog" aria-controls="reelbox">▶ Watch the engine running</button></div>
       <div class="cell"><h3>Meta Avatars — real-time interactivity</h3><p>Technical Artist on Meta's avatar
         system for VR and mixed reality, on avatar rendering and real-time interactivity. Designed and built
         a visual in-editor tool for authoring mock events and driving them at runtime, so the live-avatar
@@ -782,6 +853,79 @@ vec3 field(vec2 sp, vec2 m, float scr){
         their hands; a body-tracked multiplayer race on a large-format screen; a touch-to-clear frost wall
         revealing a life-size underwater scene. Creative and technical, end to end.</p></div>
     </div>
+    <div class="reel" aria-label="The SDF engine running on device">
+      <video src="assets/video/sdf-turntable-3.mp4" poster="assets/video/sdf-turntable-3.jpg" muted loop playsinline preload="none"></video>
+      <video src="assets/video/sdf-turntable-1.mp4" poster="assets/video/sdf-turntable-1.jpg" muted loop playsinline preload="none"></video>
+      <video src="assets/video/sdf-turntable-2.mp4" poster="assets/video/sdf-turntable-2.jpg" muted loop playsinline preload="none"></video>
+      <video src="assets/video/sdf-session.mp4" poster="assets/video/sdf-session.jpg" muted loop playsinline preload="none"></video>
+    </div>
+    <script>
+    // One clip decodes at a time, and only while the reel is on screen — four
+    // simultaneous decoders alongside a full-res WebGL2 field is exactly the kind
+    // of contention the frame counter would show.
+    (() => {
+      const reel = document.querySelector('.reel'); if (!reel) return;
+      const vids = [...reel.querySelectorAll('video')];
+      const only = v => vids.forEach(x => x === v ? x.play().catch(() => {}) : x.pause());
+      vids.forEach(v => { v.addEventListener('pointerenter', () => only(v)); v.addEventListener('click', () => only(v)); });
+      new IntersectionObserver(es => es.forEach(e => e.isIntersecting ? only(vids[0]) : vids.forEach(v => v.pause())),
+        { threshold: 0.25 }).observe(reel);
+
+      // FULLSCREEN PLAYER — how a phone sees these at all. The clip list is read
+      // back off the reel so there is exactly one list of sources on the page.
+      const cta = document.querySelector('.reel-cta'); if (!cta) return;
+      const clips = vids.map(v => ({ src: v.getAttribute('src'), poster: v.getAttribute('poster') }));
+      let box, player, strip;
+      function build() {
+        box = document.createElement('div');
+        box.id = 'reelbox'; box.hidden = true;
+        box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true');
+        box.setAttribute('aria-label', 'The SDF engine running on device');
+        player = document.createElement('video');
+        player.controls = true; player.loop = true; player.playsInline = true; player.setAttribute('playsinline', '');
+        // Muted because these captures carry NO audio track (stripped at encode) and
+        // unmuted play() rejects under autoplay policy even from inside a tap handler
+        // — measured: opened correctly, stayed paused at t=0.05. Nothing to hear, so
+        // muted costs the visitor nothing and makes playback deterministic.
+        player.muted = true; player.setAttribute('muted', ''); player.autoplay = true;
+        player.addEventListener('canplay', () => player.play().catch(() => {}));
+        const close = document.createElement('button');
+        close.className = 'rb-close'; close.type = 'button'; close.textContent = '✕';
+        close.setAttribute('aria-label', 'Close');
+        close.addEventListener('click', hide);
+        strip = document.createElement('div'); strip.className = 'rb-strip';
+        clips.forEach((c, i) => {
+          const b = document.createElement('button');
+          b.type = 'button'; b.textContent = i + 1;
+          b.setAttribute('aria-label', 'Clip ' + (i + 1));
+          b.addEventListener('click', () => show(i));
+          strip.appendChild(b);
+        });
+        box.append(close, player, strip);
+        box.addEventListener('click', e => { if (e.target === box) hide(); });
+        document.body.appendChild(box);
+      }
+      function show(i) {
+        player.src = clips[i].src; player.poster = clips[i].poster;
+        player.play().catch(() => {});
+        [...strip.children].forEach((b, n) => b.setAttribute('aria-current', String(n === i)));
+      }
+      function open() {
+        if (!box) build();
+        vids.forEach(v => v.pause());          // never decode the reel behind the overlay
+        box.hidden = false; show(0);
+        document.addEventListener('keydown', onKey);
+      }
+      function hide() {
+        if (!box) return;
+        player.pause(); player.removeAttribute('src'); player.load();
+        box.hidden = true; cta.focus();
+        document.removeEventListener('keydown', onKey);
+      }
+      function onKey(e) { if (e.key === 'Escape') hide(); }
+      cta.addEventListener('click', open);
+    })();
+    </script>
   </section>
   <!-- 3 Experience -->
   <section class="state" data-state="3">
@@ -4229,10 +4373,19 @@ function buildStates(){ bsCount++;
   // NOT vpH(): buildStates() is called at top level, and vpH is a const declared far
   // below that point — calling it here is a temporal-dead-zone ReferenceError that
   // kills the entire script (symptom: the boot overlay never dismisses, because the
-  // render loop never starts). Read the same numbers directly instead. visualViewport
-  // is preferred because it is the actual visible height in an embedded browser.
-  const shortV = (window.visualViewport ? visualViewport.height
-                                        : document.documentElement.clientHeight) <= 800;
+  // render loop never starts).
+  // Read #vp — the LAYOUT BOX, sized from --vph — rather than the live
+  // visualViewport.height. Same webview correctness (--vph is min(100svh, --vvh), so
+  // the permanent-chrome case still wins) but STABLE: raw visualViewport.height moves
+  // every time a phone's toolbar collapses or expands, so this gate FLICKERED across
+  // the 800 boundary mid-scroll and changed every plate's pad with it. Measured with
+  // the layout viewport held fixed and only the toolbar moving: state 2's cards moved
+  // 6.0 css px and state 3's rows 4.0 css px, on every toolbar movement — the same
+  // symptom as the transform bug below, from a different direction. --vph was made
+  // stable for exactly this reason (see the CSS note on it); this gate was still
+  // reading the moving number.
+  const shortV = ((vpEl && vpEl.clientHeight) ? vpEl.clientHeight
+                                              : document.documentElement.clientHeight) <= 800;
   // The shader's edge roll (SOAP_ROLL·mn) rounds this much of every form's edge
   // inward. Copy sitting closer to the rim than that rides the rounded shoulder
   // rather than the flat interior — which is exactly what made the eyebrow labels
@@ -4326,6 +4479,26 @@ function buildStates(){ bsCount++;
   // Cost is five forced reflows per buildStates (load / resize / font load), all
   // inside one frame with no paint between, not per-frame work.
   const prevCls=curThemeClass;
+  // ...and with the copy's ANIMATION TRANSFORMS neutralised, for the same reason.
+  // getBoundingClientRect() INCLUDES transforms, and the copy carries a recede/emerge
+  // transform through both crossfade windows (translate3d up to 12px + scale to 0.95,
+  // see the NOTE #1 block in scrollTarget). A rebuild that lands in one of those
+  // windows therefore measures the ANIMATION instead of the layout — and bakes it into
+  // STATES, where it STICKS until the next rebuild at a clean moment.
+  // This fires constantly on a phone: resize() calls buildStates() on every toolbar
+  // movement (the canvas rect moves, so the gate passes), and the windows cover ~20%
+  // of the timeline. Measured on a 420x774 viewport, one rebuild at frac 1.542 moved
+  // state 2's cells by up to 0.068 p-units = 26 css px, leaving the settled cards 4.5%
+  // small and 22px high — the panels visibly changing shape at one scroll point, and
+  // popping back and forth as the toolbar came and went (owner-reported, b35 rebuilds).
+  // Geometry must be a constant of LAYOUT — that is the whole point of measuring each
+  // state under its own theme — and a transient animation transform is not layout.
+  // Restored before returning, and buildStates paints nothing in between, so the
+  // clearing is invisible.
+  const savedTr=secs.map(e=>e.style.transform);
+  const savedStage=stage?stage.style.transform:null;
+  for(const e of secs) e.style.transform='none';
+  if(stage) stage.style.transform='none';                 // the parallax offset, likewise
   const asTheme=(k,fn)=>{
     if(curThemeClass) document.body.classList.remove(curThemeClass);
     curThemeClass='theme-'+k; document.body.classList.add(curThemeClass);
@@ -4349,6 +4522,8 @@ function buildStates(){ bsCount++;
   st[4]=asTheme(4,()=>({cells:oneForm(R(secs[4], mob?14:40, clear(mob?28:34))), k:0.006, corner:0.16, txt:txt(4)}));
   if(curThemeClass) document.body.classList.remove(curThemeClass);
   curThemeClass=prevCls; if(prevCls) document.body.classList.add(prevCls);
+  secs.forEach((e,i)=>{ e.style.transform=savedTr[i]; });
+  if(stage) stage.style.transform=savedStage;
   STATES=st;
 }
 buildStates();
