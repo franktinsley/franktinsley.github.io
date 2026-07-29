@@ -866,15 +866,25 @@ vec3 field(vec2 sp, vec2 m, float scr){
   // and both panels rendered on top of each other.
   if (/[?&]ovf\b/.test(location.search)) addEventListener('load', function () {
     setTimeout(function () {
-      var de = document.documentElement, vw = de.clientWidth, out = [];
+      window.scrollTo(0, window.scrollY);          // measure from a known origin
+      var de = document.documentElement, vw = de.clientWidth, out = [], inner = [];
       document.querySelectorAll('body *').forEach(function (el) {
         var cs = getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') return;
         var r = el.getBoundingClientRect();
-        if (!r.width) return;
-        var over = Math.round(Math.max(r.right - vw, -r.left));
-        if (over > 0) out.push({ el: el, over: over, r: r, cs: cs });
+        // Normalise by scrollX: a page scrolled right makes EVERY element report a
+        // negative left, which the first version of this reported as 55 offenders.
+        var left = r.left + window.scrollX, right = r.right + window.scrollX;
+        if (r.width) {
+          var over = Math.round(Math.max(right - vw, -left));
+          if (over > 0) out.push({ el: el, over: over, r: {left: left, right: right, width: r.width}, cs: cs });
+        }
+        // A container whose CONTENT is wider than itself owns the excess even when
+        // its own box is innocent — this is what a rect scan structurally misses.
+        if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0)
+          inner.push({ el: el, over: el.scrollWidth - el.clientWidth, cw: el.clientWidth, sw: el.scrollWidth });
       });
+      inner.sort(function (a, b) { return b.over - a.over; });
       out = out.filter(function (o) { return o.cs.zIndex !== '9999'; });   // not the ?diag HUD
       out.sort(function (a, b) { return b.over - a.over; });
       var name = function (e) { return e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') +
@@ -900,11 +910,22 @@ vec3 field(vec2 sp, vec2 m, float scr){
       var p = document.createElement('div');
       p.style.cssText = 'position:fixed;inset:0;z-index:99;background:#04070aF2;color:#7fdcea;' +
         'font:11px/1.45 ui-monospace,Menlo,monospace;padding:16px;overflow:auto;-webkit-overflow-scrolling:touch';
+      var mv = document.querySelector('meta[name=viewport]');
+      var vpEl2 = document.getElementById('vp');
       p.textContent = 'TAP TO CLOSE\n\ninnerWidth ' + innerWidth + '  clientWidth ' + vw +
         '\nscrollWidth ' + de.scrollWidth + '  excess ' + (de.scrollWidth - vw) +
+        '\nbody.sw ' + document.body.scrollWidth + '  vp.sw ' + (vpEl2 ? vpEl2.scrollWidth : '-') +
+        '  vp.cw ' + (vpEl2 ? vpEl2.clientWidth : '-') +
+        '\nvv.width ' + (window.visualViewport ? Math.round(visualViewport.width) : '-') +
+        '  scale ' + (window.visualViewport ? visualViewport.scale.toFixed(2) : '-') +
         '\nreally scrolls sideways: ' + (canScroll ? 'YES' : 'no') +
         (strip.length ? '\n\nIN THE OVERFLOW STRIP\n  ' + strip.join('\n  ') : '') +
         '\nnogl: ' + de.classList.contains('nogl') + '\ndpr ' + devicePixelRatio +
+        '\nmeta ' + (mv ? mv.getAttribute('content') : '(none)') +
+        '\n\nCONTENT WIDER THAN ITS BOX (' + inner.length + ')\n' +
+        (inner.length ? inner.slice(0, 8).map(function (o) {
+          return '+' + o.over + 'px  ' + name(o.el) + '  cw ' + o.cw + ' sw ' + o.sw;
+        }).join('\n') : '(none)') +
         '\n\nWIDEST OFFENDERS (' + out.length + ')\n' +
         (out.length ? out.slice(0, 12).map(function (o) {
           return '+' + o.over + 'px  ' + name(o.el) + '\n     left ' + Math.round(o.r.left) +
