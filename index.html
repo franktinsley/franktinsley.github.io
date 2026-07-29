@@ -274,7 +274,17 @@
     width:min(680px, 86vw); margin:0 auto; padding:0 0 44px; text-align:left; }
   html.nogl .state + .state{ padding-top:44px; border-top:1px solid rgba(127,220,234,.14); }
   html.nogl .eyebrow{ margin-bottom:14px; }
-  html.nogl .state::before{ display:none; }        /* the legibility scrim has no field to sit on */
+  /* THE h-scroll. .stage::before is the legibility scrim and its inset is
+     -14% -10% -18% — it hangs 10% PAST .stage on each side. With .stage at the
+     viewport width that is exactly the 42px of sideways scroll measured on device
+     (10% of 420). It survived three fixes because a pseudo-element has no node: it
+     never appears in querySelectorAll, so every rect scan reported zero offenders
+     while the page really scrolled. An on-device bisect (hide a thing, re-read
+     scrollWidth) found it in one pass.
+     Note the CSS above says plainly that the scrim hangs off .stage, NOT .state —
+     the first pass disabled .state::before, which was never the scrim.
+     It has no field to sit on here anyway: there is no renderer behind the text. */
+  html.nogl .stage::before, html.nogl .state::before{ display:none !important; }
   html.nogl .grid{ gap:26px; }
   /* The captures do not need WebGL — on the fallback they are the ONLY moving proof
      of the graphics work, so the reel earns its space here even on a phone, where
@@ -910,6 +920,31 @@ vec3 field(vec2 sp, vec2 m, float scr){
       var p = document.createElement('div');
       p.style.cssText = 'position:fixed;inset:0;z-index:99;background:#04070aF2;color:#7fdcea;' +
         'font:11px/1.45 ui-monospace,Menlo,monospace;padding:16px;overflow:auto;-webkit-overflow-scrolling:touch';
+      // BISECT. body.scrollWidth fits, no element is wide, no container overflows —
+      // yet the root is wider and really scrolls. At that point describing the page
+      // is useless; the only honest instrument is to REMOVE things and see what the
+      // number does. Pseudo-elements first (a rect scan cannot see them), then every
+      // body child including the display:none ones, then one level into #vp.
+      var base = de.scrollWidth, culprits = [];
+      var probe = function (label, apply, undo) {
+        apply(); void de.offsetWidth;
+        var now = de.scrollWidth;
+        undo(); void de.offsetWidth;
+        if (now < base) culprits.push(label + '  ' + base + ' -> ' + now);
+      };
+      var st = document.createElement('style');
+      document.head.appendChild(st);
+      probe('*::before/::after',
+        function () { st.textContent = '*::before,*::after{content:none !important;display:none !important}'; },
+        function () { st.textContent = ''; });
+      var scan = [].slice.call(document.body.children)
+        .concat(document.getElementById('vp') ? [].slice.call(document.getElementById('vp').children) : []);
+      scan.forEach(function (el) {
+        if (el === p || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return;
+        var prev = el.style.display;
+        probe(name(el), function () { el.style.display = 'none'; }, function () { el.style.display = prev; });
+      });
+      st.remove();
       var mv = document.querySelector('meta[name=viewport]');
       var vpEl2 = document.getElementById('vp');
       p.textContent = 'TAP TO CLOSE\n\ninnerWidth ' + innerWidth + '  clientWidth ' + vw +
@@ -922,6 +957,8 @@ vec3 field(vec2 sp, vec2 m, float scr){
         (strip.length ? '\n\nIN THE OVERFLOW STRIP\n  ' + strip.join('\n  ') : '') +
         '\nnogl: ' + de.classList.contains('nogl') + '\ndpr ' + devicePixelRatio +
         '\nmeta ' + (mv ? mv.getAttribute('content') : '(none)') +
+        '\n\nREMOVING THIS SHRINKS THE PAGE (' + culprits.length + ')\n' +
+        (culprits.length ? culprits.join('\n') : '(nothing — the width is the viewport itself)') +
         '\n\nCONTENT WIDER THAN ITS BOX (' + inner.length + ')\n' +
         (inner.length ? inner.slice(0, 8).map(function (o) {
           return '+' + o.over + 'px  ' + name(o.el) + '  cw ' + o.cw + ' sw ' + o.sw;
