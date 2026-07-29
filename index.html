@@ -255,6 +255,13 @@
      viewport, and body's is the fallback path when a browser disagrees. */
   html.nogl{ overflow-x:hidden; }
   html.nogl body{ overflow-x:hidden; max-width:100vw; }
+  /* The root-level rules above are NOT enough on iOS: WebKit has long ignored
+     overflow-x on html/body for the viewport, and the device confirmed it — 42px of
+     real sideways scroll with ZERO elements exceeding the viewport, so the width is
+     coming from something a DOM scan cannot see (a pseudo-element, a background).
+     Clipping on #vp works because it is an ordinary block box, not the root, and in
+     the fallback ALL content lives inside it. */
+  html.nogl #vp{ overflow-x:hidden; max-width:100%; }
   html.nogl .state{ max-width:100%; overflow-wrap:anywhere; }
   html.nogl .nogl-why{ width:min(680px,86vw); margin:22px auto 0; font-size:10.5px; line-height:1.5;
     letter-spacing:0.03em; color:var(--copy-soft); opacity:.75; text-align:left; }
@@ -870,16 +877,33 @@ vec3 field(vec2 sp, vec2 m, float scr){
       });
       out = out.filter(function (o) { return o.cs.zIndex !== '9999'; });   // not the ?diag HUD
       out.sort(function (a, b) { return b.over - a.over; });
-      var x0 = window.scrollX; window.scrollTo(400, window.scrollY);
-      var canScroll = window.scrollX > x0; window.scrollTo(x0, window.scrollY);
       var name = function (e) { return e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') +
         (e.className && e.className.toString ? '.' + e.className.toString().trim().split(/\s+/).join('.').slice(0, 30) : ''); };
+      var x0 = window.scrollX; window.scrollTo(400, window.scrollY);
+      var canScroll = window.scrollX > x0;
+      // WHO IS OUT THERE. A bounding-rect scan cannot see pseudo-elements or painted
+      // backgrounds, and the device reported real sideways scroll with zero offenders.
+      // So ask the other way round: scroll into the overflow strip and hit-test it.
+      // elementFromPoint reports the ORIGINATING element for a ::before/::after.
+      var strip = [];
+      if (canScroll) {
+        window.scrollTo(de.scrollWidth, window.scrollY);
+        var edge = vw - 3;
+        for (var y = 4; y < innerHeight; y += Math.max(24, innerHeight / 14)) {
+          var hit = document.elementFromPoint(edge, y);
+          if (!hit) continue;
+          var n = name(hit);
+          if (strip.indexOf(n) < 0) strip.push(n);
+        }
+      }
+      window.scrollTo(x0, window.scrollY);
       var p = document.createElement('div');
       p.style.cssText = 'position:fixed;inset:0;z-index:99;background:#04070aF2;color:#7fdcea;' +
         'font:11px/1.45 ui-monospace,Menlo,monospace;padding:16px;overflow:auto;-webkit-overflow-scrolling:touch';
       p.textContent = 'TAP TO CLOSE\n\ninnerWidth ' + innerWidth + '  clientWidth ' + vw +
         '\nscrollWidth ' + de.scrollWidth + '  excess ' + (de.scrollWidth - vw) +
         '\nreally scrolls sideways: ' + (canScroll ? 'YES' : 'no') +
+        (strip.length ? '\n\nIN THE OVERFLOW STRIP\n  ' + strip.join('\n  ') : '') +
         '\nnogl: ' + de.classList.contains('nogl') + '\ndpr ' + devicePixelRatio +
         '\n\nWIDEST OFFENDERS (' + out.length + ')\n' +
         (out.length ? out.slice(0, 12).map(function (o) {
