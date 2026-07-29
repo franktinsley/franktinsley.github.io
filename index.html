@@ -249,8 +249,12 @@
   /* No horizontal axis exists in a plain document, so nothing may create one. `clip`
      rather than `hidden`: it does not make a scroll container. Long unbreakable
      tokens (an address, a URL) are the other way a narrow column gains width. */
-  html.nogl{ overflow-x:clip; }
-  html.nogl body{ overflow-x:clip; max-width:100%; }
+  /* `hidden`, not `clip`: Safari only understands overflow:clip from 16, and an
+     unsupported value is dropped silently — which is why the first attempt at this
+     did nothing on a real phone. Set on BOTH: the root's value propagates to the
+     viewport, and body's is the fallback path when a browser disagrees. */
+  html.nogl{ overflow-x:hidden; }
+  html.nogl body{ overflow-x:hidden; max-width:100vw; }
   html.nogl .state{ max-width:100%; overflow-wrap:anywhere; }
   html.nogl .nogl-why{ width:min(680px,86vw); margin:22px auto 0; font-size:10.5px; line-height:1.5;
     letter-spacing:0.03em; color:var(--copy-soft); opacity:.75; text-align:left; }
@@ -846,6 +850,48 @@ vec3 field(vec2 sp, vec2 m, float scr){
     var b0 = document.getElementById('boot'); if (b0) b0.classList.add('gone');
     addEventListener('DOMContentLoaded', explain);
   }
+
+  // ?ovf — name whatever is widening the page, ON THE DEVICE. A desktop pane has a
+  // persistent scrollbar that makes documentElement.scrollWidth read ~39px over on a
+  // page that does not actually scroll, so the overflow cannot be diagnosed from
+  // here at all; it has to report from the phone that has it. Tap the panel to close.
+  // NOT ?diag — that name is already taken by the viewport-metrics HUD further down,
+  // and both panels rendered on top of each other.
+  if (/[?&]ovf\b/.test(location.search)) addEventListener('load', function () {
+    setTimeout(function () {
+      var de = document.documentElement, vw = de.clientWidth, out = [];
+      document.querySelectorAll('body *').forEach(function (el) {
+        var cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return;
+        var r = el.getBoundingClientRect();
+        if (!r.width) return;
+        var over = Math.round(Math.max(r.right - vw, -r.left));
+        if (over > 0) out.push({ el: el, over: over, r: r, cs: cs });
+      });
+      out = out.filter(function (o) { return o.cs.zIndex !== '9999'; });   // not the ?diag HUD
+      out.sort(function (a, b) { return b.over - a.over; });
+      var x0 = window.scrollX; window.scrollTo(400, window.scrollY);
+      var canScroll = window.scrollX > x0; window.scrollTo(x0, window.scrollY);
+      var name = function (e) { return e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') +
+        (e.className && e.className.toString ? '.' + e.className.toString().trim().split(/\s+/).join('.').slice(0, 30) : ''); };
+      var p = document.createElement('div');
+      p.style.cssText = 'position:fixed;inset:0;z-index:99;background:#04070aF2;color:#7fdcea;' +
+        'font:11px/1.45 ui-monospace,Menlo,monospace;padding:16px;overflow:auto;-webkit-overflow-scrolling:touch';
+      p.textContent = 'TAP TO CLOSE\n\ninnerWidth ' + innerWidth + '  clientWidth ' + vw +
+        '\nscrollWidth ' + de.scrollWidth + '  excess ' + (de.scrollWidth - vw) +
+        '\nreally scrolls sideways: ' + (canScroll ? 'YES' : 'no') +
+        '\nnogl: ' + de.classList.contains('nogl') + '\ndpr ' + devicePixelRatio +
+        '\n\nWIDEST OFFENDERS (' + out.length + ')\n' +
+        (out.length ? out.slice(0, 12).map(function (o) {
+          return '+' + o.over + 'px  ' + name(o.el) + '\n     left ' + Math.round(o.r.left) +
+                 ' right ' + Math.round(o.r.right) + ' w ' + Math.round(o.r.width) +
+                 ' pos ' + o.cs.position + ' ws ' + o.cs.whiteSpace;
+        }).join('\n') : '(none — the page itself is wider than its content)');
+      p.style.whiteSpace = 'pre-wrap';
+      p.addEventListener('click', function () { p.remove(); });
+      document.body.appendChild(p);
+    }, 700);
+  });
 })();
 </script>
 <div id="scroll"></div>
