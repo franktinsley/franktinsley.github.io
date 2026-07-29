@@ -244,9 +244,9 @@
      if it dies after painting (context loss, a late throw) those inline values
      survive and would leave the fallback blank. */
   html.nogl .state{ position:static; opacity:1 !important; transform:none !important; margin:0 auto 64px; pointer-events:auto; }
-  .reel-cta{ display:none; margin:10px 0 0; padding:7px 14px; font:inherit; font-size:11.5px;
-    letter-spacing:0.06em; color:var(--cy); background:transparent; border:1px solid var(--cy-soft);
-    border-radius:999px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  .reel-cta{ display:none; margin:0; padding:0; font:inherit; color:var(--cy); background:transparent;
+    border:0; border-bottom:1px solid var(--cy-soft); cursor:pointer; white-space:nowrap;
+    -webkit-tap-highlight-color:transparent; }
   #reelbox[hidden]{ display:none; }
   #reelbox{ position:fixed; inset:0; z-index:20; background:rgba(3,5,8,.94);
     display:grid; grid-template-rows:1fr auto; gap:10px; padding:14px; }
@@ -304,7 +304,7 @@
        instead, opening the same clips FULLSCREEN — which is the one place a
        9:19.5 capture is seen at its best. Tablets and desktop keep the reel. */
     .reel{ display:none; }
-    .reel-cta{ display:block; }
+    .reel-cta{ display:inline; }
     .grid .cell h3{ font-size:14.5px; margin-bottom:4px; }
     .grid .cell p{ font-size:12px; line-height:1.42; }
     /* 18px, not 26: state 3 carries SIX rows since the Independent 2023–now row
@@ -835,11 +835,12 @@ vec3 field(vec2 sp, vec2 m, float scr){
       <div class="cell"><h3>SDF modeling engine — Swift + Metal</h3><p>A real-time signed-distance-field
         ray-marching 3D modeler — the whole shader stack, smooth booleans, procedural geometry,
         marching-cubes export to STL/OBJ. Interactive frame rates on iOS, iPadOS and macOS.
-        ~50,000 lines across ~650 commits, built solo.</p>
-        <!-- Inside the cell, not after the grid: after the grid "it" had no antecedent
-             and read as belonging to the whole section. Phones only — desktop and
-             tablet show the reel itself a few pixels below. -->
-        <button class="reel-cta" type="button" aria-haspopup="dialog" aria-controls="reelbox">▶ Watch the engine running</button></div>
+        ~50,000 lines across ~650 commits, built solo.
+        <!-- Inline, inside this cell: after the grid "it" had no antecedent and read as
+             belonging to the whole section, and a pill button cost ~30px of block height
+             that an SE-class phone does not have (state 2 overflowed by 10px). As inline
+             text it joins the paragraph. Phones only — desktop shows the reel below. -->
+        <button class="reel-cta" type="button" aria-haspopup="dialog" aria-controls="reelbox">▶ Watch the engine running</button></p></div>
       <div class="cell"><h3>Meta Avatars — real-time interactivity</h3><p>Technical Artist on Meta's avatar
         system for VR and mixed reality, on avatar rendering and real-time interactivity. Designed and built
         a visual in-editor tool for authoring mock events and driving them at runtime, so the live-avatar
@@ -931,7 +932,7 @@ vec3 field(vec2 sp, vec2 m, float scr){
   <section class="state" data-state="3">
     <p class="eyebrow">15+ years · installations to avatars</p>
     <div class="rows">
-      <div class="row"><span class="co">Independent</span><span class="desc">The SDF engine and the System 573 core. Solo, end to end.</span><span class="yr">2023–now</span></div>
+      <div class="row"><span class="co">Independent</span><span class="desc">The SDF engine and the System 573 core — both built in 2026. Solo, end to end.</span><span class="yr">2023–now</span></div>
       <div class="row"><span class="co">Meta</span><span class="desc">Technical Artist on Meta Avatars — real-time interactivity and rendering. Built a visual in-editor tool for authoring mock events and driving them at runtime, so the live-avatar systems could be tested behaviorally.</span><span class="yr">2025–26</span></div>
       <div class="row"><span class="co">Meta</span><span class="desc">Meta's subject-matter expert on Spark AR — wrote the hands-on activities and tutorials for a curriculum training new AR creators.</span><span class="yr">2022–23</span></div>
       <div class="row"><span class="co">Microsoft</span><span class="desc">Mixed Reality developer, remote.</span><span class="yr">2021–22</span></div>
