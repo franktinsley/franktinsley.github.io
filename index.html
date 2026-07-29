@@ -237,26 +237,50 @@
      leaves a permanent "Initialising" screen over an empty page. This class is
      the degraded-but-READABLE page: canvases dropped, states in normal flow.
      A plain page beats a hung one — especially one being sent to recruiters. */
-  html.nogl #bg, html.nogl #gl, html.nogl #boot{ display:none !important; }
+  /* Drop everything that exists only to serve the renderer: both canvases, the
+     decorative frame/ticks/nameplate/readout chrome, and #scroll — a ~4700px EMPTY
+     spacer whose only job is to give the shader something to map scroll position
+     onto. Leaving #scroll in place was the bug: #vp is position:fixed, so the text
+     sat frozen in an 844px box while the page scrolled past blank space. */
+  html.nogl #bg, html.nogl #gl, html.nogl #boot, html.nogl #scroll, html.nogl #chrome,
+  html.nogl #sa{ display:none !important; }
+  html.nogl #vp{ position:static !important; height:auto !important; padding:54px 0 88px; }
   html.nogl body{ background:var(--bg-edge); }
-  html.nogl .stage{ position:static; display:block; padding:56px 0 96px; pointer-events:auto; }
+  html.nogl .stage{ position:static; display:block; padding:0; pointer-events:auto; }
   /* !important because the renderer writes opacity/transform INLINE per frame —
      if it dies after painting (context loss, a late throw) those inline values
      survive and would leave the fallback blank. */
-  html.nogl .state{ position:static; opacity:1 !important; transform:none !important; margin:0 auto 64px; pointer-events:auto; }
+  html.nogl .state{ position:static; opacity:1 !important; transform:none !important; pointer-events:auto;
+    width:min(680px, 86vw); margin:0 auto; padding:0 0 44px; text-align:left; }
+  html.nogl .state + .state{ padding-top:44px; border-top:1px solid rgba(127,220,234,.14); }
+  html.nogl .eyebrow{ margin-bottom:14px; }
+  html.nogl .state::before{ display:none; }        /* the legibility scrim has no field to sit on */
+  html.nogl .grid{ gap:26px; }
+  /* The captures do not need WebGL — on the fallback they are the ONLY moving proof
+     of the graphics work, so the reel earns its space here even on a phone, where
+     nothing has to fit a viewport any more. */
+  html.nogl .reel{ display:grid !important; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+  html.nogl .reel video{ height:auto !important; width:100% !important; aspect-ratio:1260/2736; }
+  html.nogl .reel-cta{ display:none !important; }
   .reel-cta{ display:none; margin:0; padding:0; font:inherit; color:var(--cy); background:transparent;
     border:0; border-bottom:1px solid var(--cy-soft); cursor:pointer; white-space:nowrap;
     -webkit-tap-highlight-color:transparent; }
   #reelbox[hidden]{ display:none; }
-  #reelbox{ position:fixed; inset:0; z-index:20; background:rgba(3,5,8,.94);
-    display:grid; grid-template-rows:1fr auto; gap:10px; padding:14px; }
-  #reelbox video{ width:100%; height:100%; min-height:0; object-fit:contain; }
-  #reelbox .rb-strip{ display:flex; gap:8px; justify-content:center; }
-  #reelbox .rb-strip button{ width:34px; height:34px; border-radius:50%; padding:0; cursor:pointer;
-    background:transparent; border:1px solid var(--cy-soft); color:var(--cy); font:inherit; font-size:11px; }
-  #reelbox .rb-strip button[aria-current="true"]{ background:var(--cy-soft); }
-  #reelbox .rb-close{ position:absolute; top:12px; right:14px; width:36px; height:36px; border-radius:50%;
-    background:transparent; border:1px solid var(--cy-soft); color:var(--cy); font-size:15px; cursor:pointer; }
+  /* Controls FLOAT over the video in a top bar, they do not share a column with it.
+     A bottom row under `position:fixed; inset:0` lands beneath the iOS browser
+     toolbar (fixed sizes to the LAYOUT viewport, which is taller than what you can
+     see), and the native video controls own the bottom of the frame anyway — so a
+     bottom row is hidden twice over. Top bar + safe-area insets + z-index is the
+     only arrangement with nothing competing for the space. */
+  #reelbox{ position:fixed; inset:0; height:100dvh; z-index:20; background:rgba(3,5,8,.94); }
+  #reelbox video{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  #reelbox .rb-bar{ position:absolute; z-index:2; left:10px; right:10px; display:flex; gap:8px;
+    align-items:center; top:max(10px, env(safe-area-inset-top)); }
+  #reelbox .rb-bar button{ width:38px; height:38px; border-radius:50%; padding:0; cursor:pointer; flex:0 0 auto;
+    background:rgba(3,5,8,.72); border:1px solid var(--cy-soft); color:var(--cy); font:inherit; font-size:12px;
+    -webkit-tap-highlight-color:transparent; }
+  #reelbox .rb-bar button[aria-current="true"]{ background:var(--cy-soft); color:#04161b; }
+  #reelbox .rb-close{ margin-left:auto; font-size:15px; }
   .reel{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:30px; }
   .reel video{ width:100%; aspect-ratio:1260/2736; object-fit:cover; display:block; border-radius:12px; background:#0a0e11; cursor:pointer; }
   .rows{ margin-top:8px; text-align:left; display:flex; flex-direction:column; gap:34px; }
@@ -783,6 +807,13 @@ vec3 field(vec2 sp, vec2 m, float scr){
   }
   window.addEventListener('error', function () { setTimeout(degrade, 1200); });
   setTimeout(degrade, 6000);
+  // ?nogl — force the fallback on any device, including a phone you cannot attach a
+  // debugger to. Only ever degrades the viewer's own render, so it is safe to ship
+  // and it doubles as a link to hand anyone who reports a blank page.
+  if (/[?&]nogl\b/.test(location.search)) {
+    document.documentElement.classList.add('nogl');
+    var b0 = document.getElementById('boot'); if (b0) b0.classList.add('gone');
+  }
 })();
 </script>
 <div id="scroll"></div>
@@ -894,7 +925,8 @@ vec3 field(vec2 sp, vec2 m, float scr){
         close.className = 'rb-close'; close.type = 'button'; close.textContent = '✕';
         close.setAttribute('aria-label', 'Close');
         close.addEventListener('click', hide);
-        strip = document.createElement('div'); strip.className = 'rb-strip';
+        const bar = document.createElement('div'); bar.className = 'rb-bar';
+        strip = document.createElement('div'); strip.className = 'rb-strip'; strip.style.display = 'contents';
         clips.forEach((c, i) => {
           const b = document.createElement('button');
           b.type = 'button'; b.textContent = i + 1;
@@ -902,7 +934,8 @@ vec3 field(vec2 sp, vec2 m, float scr){
           b.addEventListener('click', () => show(i));
           strip.appendChild(b);
         });
-        box.append(close, player, strip);
+        bar.append(strip, close);
+        box.append(player, bar);   // bar AFTER the video: later sibling wins the stack
         box.addEventListener('click', e => { if (e.target === box) hide(); });
         document.body.appendChild(box);
       }
