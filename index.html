@@ -246,6 +246,15 @@
   html.nogl #sa{ display:none !important; }
   html.nogl #vp{ position:static !important; height:auto !important; padding:54px 0 88px; }
   html.nogl body{ background:var(--bg-edge); }
+  /* No horizontal axis exists in a plain document, so nothing may create one. `clip`
+     rather than `hidden`: it does not make a scroll container. Long unbreakable
+     tokens (an address, a URL) are the other way a narrow column gains width. */
+  html.nogl{ overflow-x:clip; }
+  html.nogl body{ overflow-x:clip; max-width:100%; }
+  html.nogl .state{ max-width:100%; overflow-wrap:anywhere; }
+  html.nogl .nogl-why{ width:min(680px,86vw); margin:22px auto 0; font-size:10.5px; line-height:1.5;
+    letter-spacing:0.03em; color:var(--copy-soft); opacity:.75; text-align:left; }
+  html.nogl .nogl-why code{ color:var(--cy); }
   html.nogl .stage{ position:static; display:block; padding:0; pointer-events:auto; }
   /* !important because the renderer writes opacity/transform INLINE per frame —
      if it dies after painting (context loss, a late throw) those inline values
@@ -804,6 +813,28 @@ vec3 field(vec2 sp, vec2 m, float scr){
     degraded = true;
     document.documentElement.classList.add('nogl');
     var b = document.getElementById('boot'); if (b) b.classList.add('gone');
+    explain();
+  }
+  // WHY it degraded, on the page itself. The renderer writes its failure into
+  // #readout, which lives in the chrome the fallback hides — so without this the
+  // one useful diagnostic is invisible to the only person who can see the bug: a
+  // visitor on the machine it actually fails on. "No WebGL2 at all" and "WebGL2
+  // fine, this shader would not compile" want completely different fixes.
+  function explain() {
+    try {
+      var err = document.querySelector('#readout .err');
+      var why = err && err.textContent.trim();
+      if (!why) {
+        var c = document.createElement('canvas');
+        why = c.getContext('webgl2') ? 'the renderer did not reach its first frame'
+                                     : 'this browser reports no WebGL2 context';
+      }
+      var p = document.createElement('p');
+      p.className = 'nogl-why';
+      p.textContent = 'Showing the plain version — ' + why + '.';
+      var vp = document.getElementById('vp') || document.body;
+      vp.appendChild(p);
+    } catch (e) {}
   }
   window.addEventListener('error', function () { setTimeout(degrade, 1200); });
   setTimeout(degrade, 6000);
@@ -813,6 +844,7 @@ vec3 field(vec2 sp, vec2 m, float scr){
   if (/[?&]nogl\b/.test(location.search)) {
     document.documentElement.classList.add('nogl');
     var b0 = document.getElementById('boot'); if (b0) b0.classList.add('gone');
+    addEventListener('DOMContentLoaded', explain);
   }
 })();
 </script>
